@@ -3,19 +3,23 @@
 
 TEST(test1, test1) {
     LSMZDD::Storehouse<std::vector<uint32_t>> zdd(64, 3);
-    zdd.LSMinsert({0, 1}, 2);
-    zdd.LSMinsert({1, 1}, 4);
-    zdd.LSMinsert({1, 2342342}, 7);
+    zdd.LSMinsert({0, 1}, 1);
+    zdd.LSMinsert({1, 1}, 1);
+    zdd.LSMinsert({1, 2342342}, 1);
 
-    EXPECT_EQ(zdd.getLevel({0, 1}).value(), 2);
-    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 4);
-    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 7);
+    EXPECT_EQ(zdd.getLevel({0, 1}).value(), 1);
+    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 1);
+    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 1);
 
-    zdd.LSMdelete({0, 1}, 2);
+    zdd.LSMdelete({0, 1}, 1);
 
-    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 4);
-    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 7);
-    // EXPECT_FALSE(zdd.getLevel({0, 1}).has_value());
+    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 1);
+    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 1);
+    EXPECT_FALSE(zdd.getLevel({0, 1}).has_value());
+
+    zdd.LSMinsert({1,1}, 2);
+
+    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 2);
 
     //EXPECT_TRUE(zdd.Contains({1, 1}).has_value());
     //EXPECT_TRUE(zdd.Contains({1, 2342342}).has_value());
