@@ -1,11 +1,10 @@
+#include "../SAPPOROBDD/SAPPOROBDD/include/ZBDD.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
 #include <set>
 #include <vector>
-
-#include "../SAPPOROBDD/SAPPOROBDD/include/ZBDD.h"
 
 namespace LSMZDD {
 template <typename KeyType = std::vector<uint32_t>> class Storehouse {
@@ -63,62 +62,9 @@ template <typename KeyType = std::vector<uint32_t>> class Storehouse {
     return blk;
   }
 
-public:
-  Storehouse(uint32_t keyLen, uint8_t lsmBits)
-      : keyBitLen(keyLen), lsmBits_(lsmBits) {
-    BDD_Init(1024);
-    for (bddvar v = 1; v <= keyBitLen + lsmBits; ++v) {
-      BDD_NewVarOfLev(v);
-    }
-    store = bddsingle;
-  }
-
-  ~Storehouse() = default;
-
-  uint64_t Size() {
-    std::set<ZBDD> visited = {};
-    Count(store, visited);
-    return visited.size() - 2; // without terminals
-  }
-
-  void Insert(const KeyType &key) { store += KeyTransform(key, keyBitLen); }
-
-  void Delete(const KeyType &key) { store -= KeyTransform(key, keyBitLen); }
-
-  void LSMinsert(const KeyType &key, uint8_t level) {
-    // one keyTransform while incrementing?
-    //  if(level > 1) {
-    //      store -= LSMKeyTransform(key, keyBitLen, lsmBits_, level - 1);
-    //  }
-
-    // store += LSMKeyTransform(key, keyBitLen, lsmBits_, level);
-
-    if (level == 1) {
-      store += LSMKeyTransform(key, keyBitLen, lsmBits_, 1);
-    } else {
-      ZBDD transformed_key =
-          LSMKeyTransform(key, keyBitLen, lsmBits_, level - 1);
-      store -= transformed_key;
-      uint8_t diff = (level - 1) ^ level;
-      uint8_t lsmBitMask = 1;
-      for (size_t i = lsmBits_; i > 0; --i) {
-        if ((diff & lsmBitMask) != 0) {
-          std::cout << (lsmBitMask & lsmBitMask) << "\n";
-          transformed_key = transformed_key.Change(i);
-        }
-        lsmBitMask = lsmBitMask << 1;
-      }
-      store += transformed_key;
-    }
-  }
-
-  void LSMdelete(const KeyType &key, uint8_t level) {
-    store -= LSMKeyTransform(key, keyBitLen, lsmBits_, level);
-  }
-
   std::optional<ZBDD> GetSubZDDbyKey(const KeyType &key) {
     std::vector<bddvar> varArray;
-    varArray.reserve(keyBitLen + lsmBits_);
+    varArray.reserve(keyBitLen);
     int n = 0;
 
     // fill var array
@@ -132,12 +78,28 @@ public:
 
     std::sort(varArray.begin(), varArray.end());
 
+    // for(size_t val : varArray) {
+    //   std::cout << val << " ";
+    // }
+    // std::cout << "\n";
+
     ZBDD h(store);
+
+    if (isEmpty(h)) {
+      return std::nullopt;
+    }
+
     int sp = n - 1;
     for (size_t i = 1; i <= keyBitLen; ++i) {
+      // std::cout << i << "\n";
       if (isEmpty(h) || h.Top() <= lsmBits_) {
+        // std::cout << "empty: " << isEmpty(h) << "\n";
         break;
       }
+
+      // std::cout << "BDD_LevOfVar(h.Top()) = " << BDD_LevOfVar(h.Top()) <<
+      //              ", varArray[sp] = " << varArray[sp] << "\n";
+
       if (sp < 0 || BDD_LevOfVar(h.Top()) > varArray[sp]) {
         h = Child(h, 0);
       } else if (BDD_LevOfVar(h.Top()) < varArray[sp]) {
@@ -148,14 +110,16 @@ public:
       }
     }
 
-    if (h != bddfalse) {
+    // std::cout << "sp = " << sp << ", false = " << (h == bddfalse) << "\n";
+
+    if (sp < 0 && h != bddfalse) {
       h = h.OnSet(h.Top());
     }
 
     return (sp >= 0 || h == bddfalse) ? std::nullopt : std::optional<ZBDD>{h};
   }
 
-  bool checkOnLevel(ZBDD base, uint8_t level) {
+  bool CheckOnLevel(ZBDD base, uint8_t level) {
     std::vector<bddvar> varArray;
     varArray.reserve(keyBitLen + lsmBits_);
     int n = 0;
@@ -188,15 +152,69 @@ public:
     return sp < 0 && h == bddtrue;
   }
 
-  std::optional<uint8_t> getLevel(const KeyType &key) {
+public:
+  Storehouse(uint32_t keyLen, uint8_t lsmBits)
+      : keyBitLen(keyLen), lsmBits_(lsmBits) {
+    BDD_Init(1024);
+    for (bddvar v = 1; v <= keyBitLen + lsmBits; ++v) {
+      BDD_NewVarOfLev(v);
+    }
+    store = bddsingle;
+  }
+
+  ~Storehouse() = default;
+
+  uint64_t Size() {
+    std::set<ZBDD> visited = {};
+    Count(store, visited);
+    return visited.size() - 2; // without terminals
+  }
+
+  /*
+  Inserts `key` on `level`.
+
+  Unsafe: user must ensure that `key` is placed on `level - 1` before calling,
+  otherwise UB.
+  */
+  void Insert(const KeyType &key, uint8_t level) {
+    if (level == 1) {
+      store += LSMKeyTransform(key, keyBitLen, lsmBits_, 1);
+    } else {
+      ZBDD transformed_key =
+          LSMKeyTransform(key, keyBitLen, lsmBits_, level - 1);
+      store -= transformed_key;
+      uint8_t diff = (level - 1) ^ level;
+      uint8_t lsmBitMask = 1;
+      for (size_t i = lsmBits_; i > 0; --i) {
+        if ((diff & lsmBitMask) != 0) {
+          transformed_key = transformed_key.Change(i);
+        }
+        lsmBitMask = lsmBitMask << 1;
+      }
+      store += transformed_key;
+    }
+  }
+
+  /*
+  Deletes `key` placed on `level`
+  */
+  void Delete(const KeyType &key, uint8_t level) {
+    store -= LSMKeyTransform(key, keyBitLen, lsmBits_, level);
+  }
+
+  /*
+  Returns `std::optional` of current `level` of `key` or `std::nullopt` if
+  there's not `key` in zdd.
+  */
+  std::optional<uint8_t> GetLevel(const KeyType &key) {
     std::optional<ZBDD> subzdd = GetSubZDDbyKey(key);
 
-    if (!subzdd.has_value()) {
+    if (isEmpty() || !subzdd.has_value()) {
       return std::nullopt;
     }
 
     for (size_t i = 1; i < std::pow(2, lsmBits_ + 1); ++i) {
-      if (checkOnLevel(subzdd.value(), i)) {
+      if (CheckOnLevel(subzdd.value(), i)) {
         return std::optional<uint8_t>{i};
       }
     }
@@ -204,7 +222,26 @@ public:
     return std::nullopt;
   }
 
-  size_t getTop() { return store.Top(); }
+  /*
+  For `key` changes its level to (level + 1). Inserts on level `1` if there's
+  not `key` in zdd.
+
+  Returns `std::optional` of resulting `key`. If `key` is already on the topmost
+  level, returns `std::nullopt`.
+  */
+  std::optional<uint8_t> PushDown(const KeyType &key) {
+    std::optional<uint8_t> level = GetLevel(key);
+    if (!level.has_value()) {
+      Insert(key, 1);
+      return std::optional<uint8_t>(1);
+    } else {
+      if (level.value() == std::pow(2, lsmBits_) - 1) {
+        return std::nullopt;
+      }
+      Insert(key, level.value() + 1);
+      return std::optional<uint8_t>(level.value() + 1);
+    }
+  }
 
   bool isEmpty() { return store == bddtrue || store == bddfalse; }
 

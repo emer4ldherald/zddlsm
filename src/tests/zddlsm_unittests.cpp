@@ -1,32 +1,21 @@
-#include "gtest/gtest.h"
 #include "../zddlsm/zddlsm.h"
+#include "gtest/gtest.h"
 
-TEST(test1, test1) {
-    LSMZDD::Storehouse<std::vector<uint32_t>> zdd(64, 3);
-    zdd.LSMinsert({0, 1}, 1);
-    zdd.LSMinsert({1, 1}, 1);
-    zdd.LSMinsert({1, 2342342}, 1);
+TEST(Insert, level_changes_correctly) {
+  LSMZDD::Storehouse<std::vector<uint32_t>> zdd(64, 4);
+  for (size_t i = 1; i < std::pow(2, 4); ++i) {
+    zdd.Insert({12342342, 213213442}, i);
+    EXPECT_EQ(zdd.GetLevel({12342342, 213213442}).value(), i);
+    EXPECT_EQ(zdd.GetLevel({12342342, 213213442}).value(), i);
+  }
 
-    EXPECT_EQ(zdd.getLevel({0, 1}).value(), 1);
-    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 1);
-    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 1);
+  for (size_t i = 1; i < std::pow(2, 4); ++i) {
+    zdd.PushDown({93842348, 212355511});
+    EXPECT_EQ(zdd.GetLevel({93842348, 212355511}).value(), i);
+  }
 
-    zdd.LSMdelete({0, 1}, 1);
-
-    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 1);
-    EXPECT_EQ(zdd.getLevel({1, 2342342}).value(), 1);
-    EXPECT_FALSE(zdd.getLevel({0, 1}).has_value());
-
-    zdd.LSMinsert({1,1}, 2);
-
-    EXPECT_EQ(zdd.getLevel({1, 1}).value(), 2);
-
-    //EXPECT_TRUE(zdd.Contains({1, 1}).has_value());
-    //EXPECT_TRUE(zdd.Contains({1, 2342342}).has_value());
-    //EXPECT_FALSE(zdd.Contains({1, 2342341}).has_value());
-    // EXPECT_FALSE(zdd.Contains({0xFFFFFFFF, 0}).has_value());
-    // std::cout << zdd.getLevel({0, 1}).has_value() << "\n";
-    // EXPECT_EQ(zdd.getLevel({1,1}).value(), 1);
-    // EXPECT_NE(zdd.getLevel({0,1}).value(), 0);
-    // EXPECT_NE(zdd.getLevel({0,1}).value(), 2);
+  for (uint32_t i = 1; i < std::pow(2, 16); ++i) {
+    zdd.PushDown({i, i});
+    EXPECT_EQ(zdd.GetLevel({i, i}).value(), 1);
+  }
 }
