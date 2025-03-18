@@ -7,10 +7,11 @@
 #include <vector>
 
 namespace LSMZDD {
-template <typename KeyType = std::vector<uint32_t>> class Storehouse {
+template <typename T, typename KeyType = std::vector<T>> class Storehouse {
   ZBDD store;
   uint32_t keyBitLen;
   uint8_t lsmBits_;
+  uint32_t bitsForVal;
 
   static inline ZBDD Child(const ZBDD &n, const int childNum) {
     ZBDD g;
@@ -30,33 +31,23 @@ template <typename KeyType = std::vector<uint32_t>> class Storehouse {
     Count(Child(n, 1), v);
   }
 
-  static inline ZBDD KeyTransform(const KeyType &key, uint32_t keyLen) {
-    ZBDD blk = bddsingle;
-    for (size_t i = keyLen, j = 0; i > 0; --i, ++j) {
-      if (0 != (key[i / 32 + (i % 32 ? 1 : 0) - 1] & (1 << (j % 32)))) {
-        blk = blk.Change(i);
-      }
-    }
-    return blk;
-  }
-
   static inline ZBDD LSMKeyTransform(const KeyType &key, uint32_t keyLen,
-                                     uint8_t lsmBits, uint8_t LSMlev) {
+                                     uint8_t lsmBits, uint8_t LSMlev, uint32_t bitsForVal_) {
     ZBDD blk = bddsingle;
 
     // last node stands for msb
-    for (size_t i = keyLen, j = 0; i > 0; --i, ++j) {
-      if (0 != (key[i / 32 + (i % 32 ? 1 : 0) - 1] & (1 << (j % 32)))) {
-        blk = blk.Change(lsmBits + i);
-      }
-    }
-
-    uint8_t lsmBitMask = 1;
-    for (size_t i = lsmBits; i > 0; --i) {
+    uint8_t lsmBitMask = std::pow(2, lsmBits - 1);
+    for (size_t i = 1; i <= lsmBits; ++i) {
       if ((lsmBitMask & LSMlev) != 0) {
         blk = blk.Change(i);
       }
-      lsmBitMask = lsmBitMask << 1;
+      lsmBitMask = lsmBitMask >> 1;
+    }
+
+    for (size_t i = 0, j = 0; i != keyLen; ++i, ++j) {
+      if (0 != (key[i / bitsForVal_] & (static_cast<T>(std::pow(2, bitsForVal_ - 1)) >> (i % bitsForVal_)))) {
+        blk = blk.Change(lsmBits + i + 1);
+      }
     }
 
     return blk;
@@ -69,8 +60,8 @@ template <typename KeyType = std::vector<uint32_t>> class Storehouse {
 
     // fill var array
     for (uint32_t i = 1; i <= keyBitLen; ++i) {
-      if (0 != (key[i / 32 + (i % 32 ? 1 : 0) - 1] &
-                ((static_cast<uint32_t>(std::pow(2, 31)) >> ((i - 1) % 32))))) {
+      if (0 != (key[i / bitsForVal + (i % bitsForVal ? 1 : 0) - 1] &
+                ((static_cast<T>(std::pow(2, bitsForVal - 1)) >> ((i - 1) % bitsForVal))))) {
         varArray.push_back(BDD_LevOfVar(lsmBits_ + i));
         ++n;
       }
@@ -154,8 +145,8 @@ template <typename KeyType = std::vector<uint32_t>> class Storehouse {
 
 public:
   Storehouse(uint32_t keyLen, uint8_t lsmBits)
-      : keyBitLen(keyLen), lsmBits_(lsmBits) {
-    BDD_Init(1024);
+      : keyBitLen(keyLen), lsmBits_(lsmBits), bitsForVal(sizeof(T) * 8) {
+    BDD_Init(2048);
     for (bddvar v = 1; v <= keyBitLen + lsmBits; ++v) {
       BDD_NewVarOfLev(v);
     }
@@ -164,6 +155,10 @@ public:
 
   ~Storehouse() = default;
 
+  void Print() {
+    store.Print();
+  }
+
   uint64_t Size() {
     std::set<ZBDD> visited = {};
     Count(store, visited);
@@ -171,17 +166,24 @@ public:
   }
 
   /*
-  Inserts `key` on `level`.
+  Inserts `key` on `level`. If `level` = 1, deletes key from its level and inserts it on level 1.
 
   Unsafe: user must ensure that `key` is placed on `level - 1` before calling,
   otherwise UB.
   */
   void Insert(const KeyType &key, uint8_t level) {
     if (level == 1) {
-      store += LSMKeyTransform(key, keyBitLen, lsmBits_, 1);
+      std::optional<uint32_t> maybe_lev = GetLevel(key);
+      if(maybe_lev.has_value()) {
+        if(maybe_lev.value() == 1) {
+          return;
+        }
+        store -= LSMKeyTransform(key, keyBitLen, lsmBits_, maybe_lev.value(), bitsForVal);
+      }
+      store += LSMKeyTransform(key, keyBitLen, lsmBits_, 1, bitsForVal);
     } else {
       ZBDD transformed_key =
-          LSMKeyTransform(key, keyBitLen, lsmBits_, level - 1);
+          LSMKeyTransform(key, keyBitLen, lsmBits_, level - 1, bitsForVal);
       store -= transformed_key;
       uint8_t diff = (level - 1) ^ level;
       uint8_t lsmBitMask = 1;
@@ -199,7 +201,7 @@ public:
   Deletes `key` placed on `level`
   */
   void Delete(const KeyType &key, uint8_t level) {
-    store -= LSMKeyTransform(key, keyBitLen, lsmBits_, level);
+    store -= LSMKeyTransform(key, keyBitLen, lsmBits_, level, bitsForVal);
   }
 
   /*
