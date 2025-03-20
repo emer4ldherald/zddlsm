@@ -1,0 +1,3 @@
+[submodule "src/SAPPOROBDD"]
+	path = src/SAPPOROBDD
+	url = https://github.com/Shin-ichi-Minato/SAPPOROBDD.git

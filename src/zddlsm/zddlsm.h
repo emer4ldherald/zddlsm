@@ -1,4 +1,4 @@
-#include "../SAPPOROBDD/SAPPOROBDD/include/ZBDD.h"
+#include "../SAPPOROBDD/include/ZBDD.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -32,7 +32,8 @@ template <typename T, typename KeyType = std::vector<T>> class Storehouse {
   }
 
   static inline ZBDD LSMKeyTransform(const KeyType &key, uint32_t keyLen,
-                                     uint8_t lsmBits, uint8_t LSMlev, uint32_t bitsForVal_) {
+                                     uint8_t lsmBits, uint8_t LSMlev,
+                                     uint32_t bitsForVal_) {
     ZBDD blk = bddsingle;
 
     // last node stands for msb
@@ -45,7 +46,9 @@ template <typename T, typename KeyType = std::vector<T>> class Storehouse {
     }
 
     for (size_t i = 0, j = 0; i != keyLen; ++i, ++j) {
-      if (0 != (key[i / bitsForVal_] & (static_cast<T>(std::pow(2, bitsForVal_ - 1)) >> (i % bitsForVal_)))) {
+      if (0 != (key[i / bitsForVal_] &
+                (static_cast<T>(std::pow(2, bitsForVal_ - 1)) >>
+                 (i % bitsForVal_)))) {
         blk = blk.Change(lsmBits + i + 1);
       }
     }
@@ -61,7 +64,8 @@ template <typename T, typename KeyType = std::vector<T>> class Storehouse {
     // fill var array
     for (uint32_t i = 1; i <= keyBitLen; ++i) {
       if (0 != (key[i / bitsForVal + (i % bitsForVal ? 1 : 0) - 1] &
-                ((static_cast<T>(std::pow(2, bitsForVal - 1)) >> ((i - 1) % bitsForVal))))) {
+                ((static_cast<T>(std::pow(2, bitsForVal - 1)) >>
+                  ((i - 1) % bitsForVal))))) {
         varArray.push_back(BDD_LevOfVar(lsmBits_ + i));
         ++n;
       }
@@ -155,9 +159,7 @@ public:
 
   ~Storehouse() = default;
 
-  void Print() {
-    store.Print();
-  }
+  void Print() { store.Print(); }
 
   uint64_t Size() {
     std::set<ZBDD> visited = {};
@@ -166,7 +168,8 @@ public:
   }
 
   /*
-  Inserts `key` on `level`. If `level` = 1, deletes key from its level and inserts it on level 1.
+  Inserts `key` on `level`. If `level` = 1, deletes key from its level and
+  inserts it on level 1.
 
   Unsafe: user must ensure that `key` is placed on `level - 1` before calling,
   otherwise UB.
@@ -174,11 +177,12 @@ public:
   void Insert(const KeyType &key, uint8_t level) {
     if (level == 1) {
       std::optional<uint32_t> maybe_lev = GetLevel(key);
-      if(maybe_lev.has_value()) {
-        if(maybe_lev.value() == 1) {
+      if (maybe_lev.has_value()) {
+        if (maybe_lev.value() == 1) {
           return;
         }
-        store -= LSMKeyTransform(key, keyBitLen, lsmBits_, maybe_lev.value(), bitsForVal);
+        store -= LSMKeyTransform(key, keyBitLen, lsmBits_, maybe_lev.value(),
+                                 bitsForVal);
       }
       store += LSMKeyTransform(key, keyBitLen, lsmBits_, 1, bitsForVal);
     } else {

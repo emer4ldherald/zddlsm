@@ -6,8 +6,8 @@ add_compile_options(-Wall -Wextra -Wshadow -DB_64 -O3 -Ofast)
 
 add_library(sapporo STATIC IMPORTED)
 set_target_properties(sapporo PROPERTIES
-    IMPORTED_LOCATION ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/SAPPOROBDD/lib/BDD64.a
-    INTERFACE_INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/SAPPOROBDD/include
+    IMPORTED_LOCATION ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/lib/BDD64.a
+    INTERFACE_INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/include
 )
 
 add_library(zddlsmlib INTERFACE)
@@ -23,7 +23,7 @@ add_executable(zddlsm
 )
 
 set_target_properties(zddlsm PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO
 )
