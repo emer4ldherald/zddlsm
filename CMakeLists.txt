@@ -10,13 +10,14 @@ set_target_properties(sapporo PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/include
 )
 
-add_library(zddlsmlib INTERFACE)
+add_library(zddlsmlib 
+            ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cpp)
 
-target_include_directories(zddlsmlib INTERFACE
-    ${PROJECT_SOURCE_DIR}/src/zddlsm
+target_include_directories(zddlsmlib PUBLIC
+    ${PROJECT_SOURCE_DIR}/src/zddlsm/include
 )
 
-target_link_libraries(zddlsmlib INTERFACE sapporo)
+target_link_libraries(zddlsmlib PUBLIC sapporo)
 
 add_executable(zddlsm
     src/main.cpp
