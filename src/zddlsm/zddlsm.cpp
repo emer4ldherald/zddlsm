@@ -1,30 +1,56 @@
 #include "include/zddlsm.h"
 
-std::string AddPadding(const std::string& key, uint32_t keyBitLen) {
-    auto key_with_padding = key;
-    key_with_padding.reserve(keyBitLen / 8);
-    for (size_t i = key.size(); i < (keyBitLen / 8); ++i) {
-        key_with_padding.push_back(0);
-    }
-    return key_with_padding;
-}
+namespace {
 
-std::string GetMinKey(size_t bitLen) {
-    std::string min_key(bitLen / 8, 0);
+/*
+Number of preallocated nodes to avoid extra allocations and rehashing of
+SAPPORO.
+*/
+constexpr static uint32_t ZDD_INIT_SIZE = 2048;
+
+/*
+Bits for column family information and for other purposes.
+*/
+constexpr static uint32_t ZDD_ADDITIONAL_BITS = 32;
+
+std::string GetMinKey(size_t key_bit_len) {
+    std::string min_key(key_bit_len / 8, 0);
     min_key[min_key.size() - 1] = 1;
     return min_key;
 }
 
-std::vector<bddvar> GetNzZddVars(const std::string& key, uint32_t keyBitLen,
-                                 uint32_t bitsForVal, uint8_t lsmBits) {
+/*
+Singleton object initilizes ZDD.
+*/
+class ZDDSystem {
+public:
+    static void InitOnce(uint32_t total_vars) {
+        static ZDDSystem instance(total_vars);
+    }
+
+private:
+    ZDDSystem(uint32_t total_vars) {
+        BDD_Init(ZDD_INIT_SIZE);
+        for (bddvar v = 1; v <= total_vars; ++v) {
+            BDD_NewVarOfLev(v);
+        }
+    }
+};
+
+std::vector<bddvar> GetNzZddVars(const ZDDLSM::ZddInternalKey& zdd_ikey,
+                                 uint32_t key_bit_len, uint32_t bits_for_val,
+                                 uint8_t lsm_bits,
+                                 uint32_t prefix_len = 0xFFFFFFFF) {
     std::vector<bddvar> nz_zdd_vars;
-    nz_zdd_vars.reserve(keyBitLen);
+    nz_zdd_vars.reserve(key_bit_len);
     int nz_bits_n = 0;
 
-    // fill var array
-    for (uint32_t i = keyBitLen, j = 0; i != 0; --i, ++j) {
-        if (0 != (key[(i - 1) / bitsForVal] & 1 << j % bitsForVal)) {
-            nz_zdd_vars.push_back(BDD_LevOfVar(lsmBits + j + 1));
+    for (uint32_t i = key_bit_len, j = 0; i != 0; --i, ++j) {
+        if (i > prefix_len) {
+            continue;
+        }
+        if (0 != (zdd_ikey[(i - 1) / bits_for_val] & 1 << j % bits_for_val)) {
+            nz_zdd_vars.push_back(BDD_LevOfVar(lsm_bits + j + 1));
             ++nz_bits_n;
         }
     }
@@ -32,14 +58,40 @@ std::vector<bddvar> GetNzZddVars(const std::string& key, uint32_t keyBitLen,
     std::sort(nz_zdd_vars.begin(), nz_zdd_vars.end());
     return nz_zdd_vars;
 }
+}  // namespace
 
 namespace ZDDLSM {
+ZddInternalKey::ZddInternalKey(const std::string& key)
+    : key_(key), cf_id_(0), total_size_(key.size()), has_cf_(false) {}
+
+ZddInternalKey::ZddInternalKey(const std::string& key, uint32_t cf_id)
+    : key_(key),
+      cf_id_(cf_id),
+      total_size_(key.size() + sizeof(cf_id_)),
+      has_cf_(true) {}
+
+char ZddInternalKey::operator[](uint32_t index) const {
+    if (index >= total_size_) {
+        return 0;
+    }
+    if (has_cf_ && index < sizeof(cf_id_)) {
+        uint32_t byte_pos = sizeof(cf_id_) - index - 1;
+        return static_cast<char>((cf_id_ >> byte_pos * 8 * sizeof(char)) &
+                                 0x000000FF);
+    } else if (has_cf_) {
+        return key_[index - sizeof(cf_id_)];
+    }
+    return key_[index];
+}
+
 bool Storehouse::ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
                                 int& stack_pointer, int top_var_n) {
     auto level_of_top_var = BDD_LevOfVar(top_var_n);
-    if (stack_pointer < 0 || level_of_top_var > nz_zdd_vars[stack_pointer]) {
+    if (stack_pointer < 0 ||
+        level_of_top_var > static_cast<int64_t>(nz_zdd_vars[stack_pointer])) {
         zdd = Child(zdd, 0);
-    } else if (level_of_top_var < nz_zdd_vars[stack_pointer]) {
+    } else if (level_of_top_var <
+               static_cast<int64_t>(nz_zdd_vars[stack_pointer])) {
         return false;
     } else {
         zdd = Child(zdd, 1);
@@ -48,51 +100,56 @@ bool Storehouse::ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
     return true;
 }
 
-inline ZBDD Storehouse::Child(const ZBDD& n, const int childNum) {
+inline ZBDD Storehouse::Child(const ZBDD& n, const int child_num) {
     ZBDD g;
-    if (childNum != 0)
+    if (child_num != 0)
         g = n.OnSet0(n.Top());
     else
         g = n.OffSet(n.Top());
     return g;
 }
 
-inline ZBDD Storehouse::LSMKeyTransform(const std::string& key, uint32_t keyLen,
-                                        uint8_t lsmBits, uint8_t LSMlev,
-                                        uint32_t bitsForVal_) {
+inline ZBDD Storehouse::LSMKeyTransform(const ZddInternalKey& zdd_ikey,
+                                        uint8_t lsm_lev) {
     ZBDD resulting_zdd = bddsingle;
 
     // last node stands for msb
-    uint8_t lsmBitMask = std::pow(2, lsmBits - 1);
-    for (size_t i = 1; i <= lsmBits; ++i) {
-        if ((lsmBitMask & LSMlev) != 0) {
+    uint8_t lsmBitMask = std::pow(2, lsm_bits_ - 1);
+    for (size_t i = 1; i <= lsm_bits_; ++i) {
+        if ((lsmBitMask & lsm_lev) != 0) {
             resulting_zdd = resulting_zdd.Change(i);
         }
         lsmBitMask = lsmBitMask >> 1;
     }
 
-    for (size_t i = keyLen, j = 0; i != 0; --i, ++j) {
-        if (0 != (key[(i - 1) / bitsForVal_] & 1 << j % bitsForVal_)) {
-            resulting_zdd = resulting_zdd.Change(lsmBits + (keyLen - i) + 1);
+    for (size_t i = key_bit_len_, j = 0; i != 0; --i, ++j) {
+        if (0 != (zdd_ikey[(i - 1) / bits_for_val_] & 1 << j % bits_for_val_)) {
+            resulting_zdd =
+                resulting_zdd.Change(lsm_bits_ + (key_bit_len_ - i) + 1);
         }
     }
 
     return resulting_zdd;
 }
 
-std::optional<ZBDD> Storehouse::GetSubZDDbyKey(const std::string& key) {
+std::optional<ZBDD> Storehouse::GetSubZDDbyKey(const ZddInternalKey& key,
+                                               uint32_t prefix_len) {
     std::vector<bddvar> nz_zdd_vars =
-        GetNzZddVars(key, keyBitLen, bitsForVal, lsmBits_);
-    ZBDD current_zdd(store);
+        GetNzZddVars(ZddInternalKey(key), key_bit_len_, bits_for_val_,
+                     lsm_bits_, prefix_len);
+    ZBDD current_zdd(store_);
 
     if (isEmpty(current_zdd)) {
         return std::nullopt;
     }
 
     int stack_pointer = nz_zdd_vars.size() - 1;
-    for (size_t i = 1; i <= keyBitLen; ++i) {
+    for (size_t i = 1; i <= key_bit_len_; ++i) {
         auto top_var_n = current_zdd.Top();
-        if (isEmpty(current_zdd) || top_var_n <= lsmBits_) {
+        if (isEmpty(current_zdd) || top_var_n <= lsm_bits_ ||
+            (prefix_len != 0xFFFFFFFF &&
+             static_cast<uint32_t>(top_var_n) <=
+                 key_bit_len_ + lsm_bits_ - prefix_len)) {
             break;
         }
 
@@ -111,137 +168,159 @@ std::optional<ZBDD> Storehouse::GetSubZDDbyKey(const std::string& key) {
                : std::optional<ZBDD>{current_zdd};
 }
 
-bool Storehouse::CheckOnLevel(ZBDD base, uint8_t level) {
-    std::vector<bddvar> nz_zdd_vars;
-    nz_zdd_vars.reserve(keyBitLen + lsmBits_);
-    int nz_bits_n = 0;
-
-    for (size_t i = 1; i <= lsmBits_; ++i) {
-        if ((level & (static_cast<uint32_t>(std::pow(2, lsmBits_)) >> i)) !=
-            0) {
-            nz_zdd_vars.push_back(BDD_LevOfVar(i));
-            ++nz_bits_n;
-        }
-    }
-
-    std::sort(nz_zdd_vars.begin(), nz_zdd_vars.end());
-
-    ZBDD current_zdd(base);
-
-    int stack_pointer = nz_bits_n - 1;
-    for (size_t i = 1; i <= lsmBits_; ++i) {
-        if (isEmpty(current_zdd)) {
-            break;
-        }
-
-        if (!ProcessZddNode(current_zdd, nz_zdd_vars, stack_pointer,
-                            current_zdd.Top())) {
-            return false;
-        }
-    }
-
-    return stack_pointer < 0 && current_zdd == bddtrue;
+Storehouse::Storehouse(uint32_t key_bit_len, uint8_t lsm_bits)
+    : store_(bddsingle),
+      key_bit_len_(key_bit_len + ZDD_ADDITIONAL_BITS),
+      lsm_bits_(lsm_bits),
+      bits_for_val_(sizeof(char) * 8),
+      curr_task_id_(0),
+      ready_task_id_(0) {
+    ZDDSystem::InitOnce(key_bit_len_ + lsm_bits_ + ZDD_ADDITIONAL_BITS);
 }
 
-Storehouse::Storehouse(uint32_t keyLen, uint8_t lsmBits)
-    : keyBitLen(keyLen), lsmBits_(lsmBits), bitsForVal(sizeof(char) * 8) {
-    BDD_Init(2048);
-    for (bddvar v = 1; v <= keyBitLen + lsmBits; ++v) {
-        BDD_NewVarOfLev(v);
-    }
-    store = bddsingle;
+ZDDLockGuard Storehouse::Lock() {
+    return ZDDLockGuard(curr_task_id_, ready_task_id_);
 }
 
-ZDDLockGuard Storehouse::Lock() { return ZDDLockGuard(); }
+void Storehouse::Print() { store_.Print(); }
 
-void Storehouse::Print() { store.Print(); }
-
-void Storehouse::Insert(const std::string &key, uint8_t level) {
-    auto key_with_padding = AddPadding(key, keyBitLen);
+void Storehouse::NextLevelInsert(const std::string& key, uint8_t level) {
     if (level == 1) {
-        std::optional<uint32_t> maybe_lev = GetLevel(key_with_padding);
+        std::optional<uint32_t> maybe_lev = GetLevel(key);
         if (maybe_lev.has_value()) {
             if (maybe_lev.value() == 1) {
                 return;
             }
-            store -= LSMKeyTransform(key_with_padding, keyBitLen, lsmBits_,
-                                     maybe_lev.value(), bitsForVal);
+            store_ -= LSMKeyTransform(key, maybe_lev.value());
         }
-        store += LSMKeyTransform(key_with_padding, keyBitLen, lsmBits_, 1, bitsForVal);
+        store_ += LSMKeyTransform(key, 1);
     } else {
-        ZBDD transformed_key =
-            LSMKeyTransform(key_with_padding, keyBitLen, lsmBits_, level - 1, bitsForVal);
-        store -= transformed_key;
+        ZBDD transformed_key = LSMKeyTransform(key, level - 1);
+        store_ -= transformed_key;
         uint8_t diff = (level - 1) ^ level;
         uint8_t lsmBitMask = 1;
-        for (size_t i = lsmBits_; i > 0; --i) {
+        for (size_t i = lsm_bits_; i > 0; --i) {
             if ((diff & lsmBitMask) != 0) {
                 transformed_key = transformed_key.Change(i);
             }
             lsmBitMask = lsmBitMask << 1;
         }
-        store += transformed_key;
+        store_ += transformed_key;
     }
 }
 
-void Storehouse::Delete(const std::string &key, uint8_t level) {
-    auto key_with_padding = AddPadding(key, keyBitLen);
-    store -= LSMKeyTransform(key_with_padding, keyBitLen, lsmBits_, level, bitsForVal);
+void Storehouse::InsertImpl(const ZddInternalKey& ikey, uint8_t from_level,
+                            uint8_t to_level) {
+    store_ -= LSMKeyTransform(ikey, from_level);
+    store_ += LSMKeyTransform(ikey, to_level);
 }
 
-std::optional<uint8_t> Storehouse::GetLevel(const std::string &key) {
-    auto key_with_padding = AddPadding(key, keyBitLen);
-    std::optional<ZBDD> subzdd = GetSubZDDbyKey(key_with_padding);
+void Storehouse::Insert(const std::string& key, uint8_t from_level,
+                        uint8_t to_level) {
+    ZddInternalKey ikey(key);
+    InsertImpl(ikey, from_level, to_level);
+}
 
-    if (isEmpty() || !subzdd.has_value()) {
+void Storehouse::Insert(uint32_t cf_id, const std::string& key,
+                        uint8_t from_level, uint8_t to_level) {
+    ZddInternalKey ikey(key, cf_id);
+    InsertImpl(ikey, from_level, to_level);
+}
+
+void Storehouse::DeleteImpl(const ZddInternalKey& ikey, uint8_t level) {
+    store_ -= LSMKeyTransform(ikey, level);
+}
+
+void Storehouse::Delete(const std::string& key, uint8_t level) {
+    ZddInternalKey ikey(key);
+    DeleteImpl(ikey, level);
+}
+
+void Storehouse::Delete(uint32_t cf_id, const std::string& key, uint8_t level) {
+    ZddInternalKey ikey(key, cf_id);
+    DeleteImpl(ikey, level);
+}
+
+std::optional<uint8_t> Storehouse::GetLevelImpl(const ZddInternalKey& ikey) {
+    std::optional<ZBDD> maybe_subzdd = GetSubZDDbyKey(ikey);
+
+    if (isEmpty() || !maybe_subzdd.has_value()) {
         return std::nullopt;
     }
 
-    for (size_t i = 1; i < std::pow(2, lsmBits_ + 1); ++i) {
-        if (CheckOnLevel(subzdd.value(), i)) {
-            return std::optional<uint8_t>{i};
+    ZBDD curr_zdd = maybe_subzdd.value();
+    ZBDD current_bit_is_taken;
+    ZBDD current_bit_is_not_taken;
+
+    uint8_t level = 0;
+
+    for (int bit = 0; bit != lsm_bits_; ++bit) {
+        current_bit_is_not_taken = Child(curr_zdd, 0);
+        current_bit_is_taken = Child(curr_zdd, 1);
+        if (current_bit_is_not_taken != bddfalse) {
+            curr_zdd = current_bit_is_not_taken;
+        } else if (current_bit_is_taken != bddfalse) {
+            level = level | (1 << (lsm_bits_ - curr_zdd.Top()));
+            curr_zdd = current_bit_is_taken;
+        } else {
+            return std::nullopt;
+        }
+
+        if (curr_zdd == bddtrue) {
+            break;
         }
     }
 
-    return std::nullopt;
+    return level;
+}
+
+std::optional<uint8_t> Storehouse::GetLevel(const std::string& key) {
+    ZddInternalKey ikey(key);
+    return GetLevelImpl(ikey);
+}
+
+std::optional<uint8_t> Storehouse::GetLevel(uint32_t cf_id,
+                                            const std::string& key) {
+    ZddInternalKey ikey(key, cf_id);
+    return GetLevelImpl(ikey);
 }
 
 std::optional<uint8_t> Storehouse::PushDown(const std::string& key) {
     std::optional<uint8_t> level = GetLevel(key);
     if (!level.has_value()) {
-        Insert(key, 1);
+        NextLevelInsert(key, 1);
         return std::optional<uint8_t>(1);
     } else {
-        if (level.value() == std::pow(2, lsmBits_) - 1) {
+        if (level.value() == std::pow(2, lsm_bits_) - 1) {
             return std::nullopt;
         }
-        Insert(key, level.value() + 1);
+        NextLevelInsert(key, level.value() + 1);
         return std::optional<uint8_t>(level.value() + 1);
     }
 }
 
-bool Storehouse::isEmpty() { return store == bddtrue || store == bddfalse; }
+bool Storehouse::isEmpty() { return store_ == bddtrue || store_ == bddfalse; }
 
 bool Storehouse::isEmpty(ZBDD store) {
     return store == bddtrue || store == bddfalse;
 }
 
-ZDDLockGuard::ZDDLockGuard() {
-    id = currId_.fetch_add(1);
+ZDDLockGuard::ZDDLockGuard(std::atomic<uint32_t>& curr_task_id,
+                           std::atomic<uint32_t>& ready_task)
+    : curr_task_id_(curr_task_id), ready_task_id_(ready_task) {
+    id = curr_task_id.fetch_add(1);
 
-    while (ready_.load() != id) {
+    while (ready_task.load() != id) {
     }
 }
 
-ZDDLockGuard::~ZDDLockGuard() { ready_.fetch_add(1); }
-
-std::atomic<uint32_t> ZDDLockGuard::currId_{0};
-std::atomic<uint32_t> ZDDLockGuard::ready_{0};
+ZDDLockGuard::~ZDDLockGuard() { ready_task_id_.fetch_add(1); }
 
 bool ZDDLSMIterator::TraverseNode(ZddNode*& curr_node, ZBDD& current_zdd,
                                   int& curr_level, int& stack_pointer,
                                   std::vector<bddvar>& nz_zdd_vars) {
-    if (stack_pointer < 0 || curr_level > nz_zdd_vars[stack_pointer]) {
+    if (stack_pointer < 0 ||
+        curr_level > static_cast<int64_t>(nz_zdd_vars[stack_pointer])) {
         nodes_.push_back(
             {current_zdd.OnSet(current_zdd.Top()), 0, false, false});
 
@@ -252,7 +331,7 @@ bool ZDDLSMIterator::TraverseNode(ZddNode*& curr_node, ZBDD& current_zdd,
         curr_node = &nodes_.back();
         curr_node->level = curr_level;
 
-    } else if (curr_level < nz_zdd_vars[stack_pointer]) {
+    } else if (curr_level < static_cast<int64_t>(nz_zdd_vars[stack_pointer])) {
         curr_node = &nodes_.back();
         curr_level = curr_node->level;
         nodes_.pop_back();
@@ -289,15 +368,15 @@ void ZDDLSMIterator::UpdateCurrentNode(ZddNode*& curr_node, ZBDD& current_zdd,
     }
 }
 
-ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string &key)
-    : zdd_(zdd), end_(false) {
-    auto key_with_padding = AddPadding(key, zdd_->keyBitLen);
+void ZDDLSMIterator::Init(const std::string& key, ZBDD& initial_zdd) {
     nodes_ = std::deque<ZddNode>();
 
     std::vector<bddvar> nz_zdd_vars =
-        GetNzZddVars(key_with_padding, zdd_->keyBitLen, zdd_->bitsForVal, zdd_->lsmBits_);
+        GetNzZddVars(ZddInternalKey(key), zdd_->key_bit_len_,
+                     zdd_->bits_for_val_, zdd_->lsm_bits_);
 
-    ZBDD current_zdd(zdd_->store);
+    ZBDD current_zdd(initial_zdd);
+
     nodes_.push_back({bddnull, BDD_LevOfVar(current_zdd.Top()), false, false});
 
     if (zdd_->isEmpty(current_zdd)) {
@@ -309,8 +388,9 @@ ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string &key)
     int curr_level = BDD_LevOfVar(current_zdd.Top());
     ZddNode* curr_node = &nodes_.back();
 
-    for (size_t i = 1; i <= zdd_->keyBitLen; ++i) {
-        if (zdd_->isEmpty(current_zdd) || current_zdd.Top() <= zdd_->lsmBits_) {
+    for (size_t i = 1; i <= zdd_->key_bit_len_; ++i) {
+        if (zdd_->isEmpty(current_zdd) ||
+            current_zdd.Top() <= zdd_->lsm_bits_) {
             break;
         }
 
@@ -321,7 +401,7 @@ ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string &key)
     }
 
     if (!(stack_pointer >= 0 || current_zdd == bddfalse)) {
-        if (!nodes_.empty() && nodes_.back().level <= zdd_->lsmBits_) {
+        if (!nodes_.empty() && nodes_.back().level <= zdd_->lsm_bits_) {
             nodes_.pop_back();
         } else if (nodes_.empty()) {
             end_ = true;
@@ -337,7 +417,6 @@ ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string &key)
         nodes_.pop_back();
         current_zdd = curr_node->anc;
         curr_node = &nodes_.back();
-        curr_level = curr_node->level;
 
         curr_zdd_ = current_zdd;
 
@@ -352,8 +431,28 @@ ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string &key)
     Next();
 }
 
+ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, const std::string& key)
+    : zdd_(zdd), end_(false) {
+    Init(key, zdd_->store_);
+}
+
+ZDDLSMIterator::ZDDLSMIterator(Storehouse* zdd, uint32_t cf_id,
+                               const std::string& key)
+    : zdd_(zdd), end_(false) {
+    ZddInternalKey ikey("", cf_id);
+    ZBDD initial_zdd = zdd->GetSubZDDbyKey(ikey, 32).value_or(bddnull);
+    if (initial_zdd == bddnull) {
+        end_ = true;
+    } else {
+        Init(key, initial_zdd);
+    }
+}
+
 ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd)
-    : ZDDLSMIterator(zdd, GetMinKey(zdd->keyBitLen)) {}
+    : ZDDLSMIterator(zdd, GetMinKey(zdd->key_bit_len_)) {}
+
+ZDDLSMIterator::ZDDLSMIterator(ZDDLSM::Storehouse* zdd, uint32_t cf_id)
+    : ZDDLSMIterator(zdd, cf_id, GetMinKey(zdd->key_bit_len_)) {}
 
 void ZDDLSMIterator::Next() {
     if (end_) {
@@ -364,7 +463,7 @@ void ZDDLSMIterator::Next() {
     int curr_level = curr_node->level;
     ZBDD current_zdd = curr_zdd_;
 
-    if (curr_level <= zdd_->lsmBits_) {
+    if (curr_level <= zdd_->lsm_bits_) {
         nodes_.pop_back();
         current_zdd = curr_node->anc;
         curr_node = &nodes_.back();
@@ -372,7 +471,7 @@ void ZDDLSMIterator::Next() {
     }
 
     while (!nodes_.empty()) {
-        if (current_zdd != bddfalse && curr_level <= zdd_->lsmBits_) {
+        if (current_zdd != bddfalse && curr_level <= zdd_->lsm_bits_) {
             break;
         }
 
@@ -424,23 +523,29 @@ void ZDDLSMIterator::Next() {
 }
 
 std::optional<KeyLevelPair> ZDDLSMIterator::operator*() const {
-    std::string str(zdd_->keyBitLen / 8, 0);
+    std::string str(zdd_->key_bit_len_ / 8, 0);
 
     if (end_) {
         return std::nullopt;
     }
 
     for (ZddNode node : nodes_) {
-        int bit_pos = (node.level - zdd_->lsmBits_ - 1);
+        int bit_pos = (node.level - zdd_->lsm_bits_ - 1);
         int char_n = str.size() - bit_pos / 8 - 1;
         str[char_n] = str[char_n] | ((node.right * 1) << bit_pos % 8);
     }
 
     auto r_it = str.rbegin();
     while (*r_it == 0) {
-        str.pop_back();
-        r_it = str.rbegin();
+        ++r_it;
     }
+    str.resize(str.size() - std::distance(str.rbegin(), r_it));
+
+    auto it = str.begin();
+    while (*it == 0) {
+        ++it;
+    }
+    str.erase(0, std::distance(str.begin(), it));
 
     uint8_t level = zdd_->GetLevel(str).value_or(0);
 

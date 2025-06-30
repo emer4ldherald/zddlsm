@@ -12,12 +12,9 @@
 
 namespace ZDDLSM {
 class KeyLevelPair {
-private:
-    std::string key_;
-    uint8_t level_;
-
 public:
-    KeyLevelPair(std::string key, uint8_t level) : key_(key), level_(level) {}
+    KeyLevelPair(std::string key, uint8_t level)
+        : key_(std::move(key)), level_(level) {}
     KeyLevelPair() : key_(""), level_(0) {}
 
     std::string Key() const { return key_; }
@@ -26,6 +23,10 @@ public:
     bool operator==(const KeyLevelPair& other) const {
         return key_ == other.key_ && level_ == other.level_;
     }
+
+private:
+    std::string key_;
+    uint8_t level_;
 };
 
 /*
@@ -34,41 +35,46 @@ LockGuard for concurrent access.
 Accessing threads block zdd sequentially.
 */
 class ZDDLockGuard {
-private:
-    static std::atomic<uint32_t> currId_;
-    static std::atomic<uint32_t> ready_;
-
 public:
     uint32_t id;
 
-    ZDDLockGuard();
+    ZDDLockGuard() = delete;
+
+    ZDDLockGuard(std::atomic<uint32_t>& curr_task_id,
+                 std::atomic<uint32_t>& ready_task);
 
     ~ZDDLockGuard();
+
+private:
+    std::atomic<uint32_t>& curr_task_id_;
+    std::atomic<uint32_t>& ready_task_id_;
+};
+
+/*
+Internal representation of a key. Contains column family information.
+
+Be sure that `key` lifetime is longer that its ZDD internal representation.
+*/
+class ZddInternalKey {
+public:
+    ZddInternalKey(const std::string& key);
+
+    ZddInternalKey(const std::string& key, uint32_t cf_id);
+
+    char operator[](uint32_t index) const;
+
+private:
+    const std::string& key_;
+    uint32_t cf_id_;
+    uint32_t total_size_;
+    bool has_cf_;
 };
 
 class ZDDLSMIterator;
 
 class Storehouse {
-    ZBDD store;
-    uint32_t keyBitLen;
-    uint8_t lsmBits_;
-    uint32_t bitsForVal;
-
-    bool ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
-                        int& stack_pointer, int top_var_n);
-
-    static inline ZBDD Child(const ZBDD& n, const int childNum);
-
-    static inline ZBDD LSMKeyTransform(const std::string& key, uint32_t keyLen,
-                                       uint8_t lsmBits, uint8_t LSMlev,
-                                       uint32_t bitsForVal_);
-
-    std::optional<ZBDD> GetSubZDDbyKey(const std::string& key);
-
-    bool CheckOnLevel(ZBDD base, uint8_t level);
-
 public:
-    Storehouse(uint32_t keyLen, uint8_t lsmBits);
+    Storehouse(uint32_t key_len, uint8_t lsm_bits);
 
     ZDDLockGuard Lock();
 
@@ -77,24 +83,32 @@ public:
     void Print();
 
     /*
-    Inserts `key` on `level`. If `level` = 1, deletes key from its level and
-    inserts it on level 1.
-
-    Unsafe: user must ensure that `key` is placed on `level - 1` before calling,
-    otherwise UB.
+    Inserts `key` to `level` and deletes its entry in `level - 1` level.
     */
-    void Insert(const std::string &key, uint8_t level);
+    void NextLevelInsert(const std::string& key, uint8_t level);
+
+    /*
+    Inserts `key` to `to_level`, deletes `key` in `from_level`.
+    */
+    void Insert(const std::string& key, uint8_t from_level, uint8_t to_level);
+
+    void Insert(uint32_t cf_id, const std::string& key, uint8_t from_level,
+                uint8_t to_level);
 
     /*
     Deletes `key` placed on `level`
     */
-    void Delete(const std::string &key, uint8_t level);
+    void Delete(const std::string& key, uint8_t level);
+
+    void Delete(uint32_t cf_id, const std::string& key, uint8_t level);
 
     /*
     Returns `std::optional` of current `level` of `key` or `std::nullopt` if
     there's not `key` in zdd.
     */
-    std::optional<uint8_t> GetLevel(const std::string &key);
+    std::optional<uint8_t> GetLevel(const std::string& key);
+
+    std::optional<uint8_t> GetLevel(uint32_t cf_id, const std::string& key);
 
     /*
     For `key` changes its level to (level + 1). Inserts on level `1` if there's
@@ -109,10 +123,46 @@ public:
 
     static bool isEmpty(ZBDD store);
 
+private:
+    ZBDD store_;
+    uint32_t key_bit_len_;
+    uint8_t lsm_bits_;
+    uint32_t bits_for_val_;
+
+    std::atomic<uint32_t> curr_task_id_;
+    std::atomic<uint32_t> ready_task_id_;
+
+    bool ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
+                        int& stack_pointer, int top_var_n);
+
+    static inline ZBDD Child(const ZBDD& n, const int child_num);
+
+    inline ZBDD LSMKeyTransform(const ZddInternalKey& key, uint8_t lsm_lev);
+
+    std::optional<ZBDD> GetSubZDDbyKey(const ZddInternalKey& key,
+                                       uint32_t prefix_len = 0xFFFFFFFF);
+
+    void InsertImpl(const ZddInternalKey& ikey, uint8_t from_level,
+                    uint8_t to_level);
+
+    void DeleteImpl(const ZddInternalKey& ikey, uint8_t level);
+
+    std::optional<uint8_t> GetLevelImpl(const ZddInternalKey& ikey);
+
     friend class ZDDLSMIterator;
 };
 
 class ZDDLSMIterator {
+public:
+    ZDDLSMIterator(Storehouse* zdd, const std::string& key);
+    ZDDLSMIterator(Storehouse* zdd, uint32_t cf_id, const std::string& key);
+    ZDDLSMIterator(ZDDLSM::Storehouse* zdd);
+    ZDDLSMIterator(ZDDLSM::Storehouse* zdd, uint32_t cf_id);
+
+    std::optional<KeyLevelPair> operator*() const;
+
+    void Next();
+
 private:
     struct ZddNode {
         ZBDD anc;
@@ -126,18 +176,12 @@ private:
     Storehouse* zdd_;
     bool end_;
 
+    void Init(const std::string& key, ZBDD& initial_zdd);
+
     bool TraverseNode(ZddNode*& curr_node, ZBDD& current_zdd, int& curr_level,
                       int& stack_pointer, std::vector<bddvar>& nz_zdd_vars);
 
     void UpdateCurrentNode(ZddNode*& curr_node, ZBDD& current_zdd,
                            int& curr_level);
-
-public:
-    ZDDLSMIterator(Storehouse* zdd, const std::string &key);
-    ZDDLSMIterator(ZDDLSM::Storehouse* zdd);
-
-    std::optional<KeyLevelPair> operator*() const;
-
-    void Next();
 };
 }  // namespace ZDDLSM
