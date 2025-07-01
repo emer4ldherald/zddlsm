@@ -83,16 +83,11 @@ public:
     void Print();
 
     /*
-    Inserts `key` to `level` and deletes its entry in `level - 1` level.
-    */
-    void NextLevelInsert(const std::string& key, uint8_t level);
-
-    /*
     Inserts `key` to `to_level`, deletes `key` in `from_level`.
     */
-    void Insert(const std::string& key, uint8_t from_level, uint8_t to_level);
+    void Update(const std::string& key, uint8_t from_level, uint8_t to_level);
 
-    void Insert(uint32_t cf_id, const std::string& key, uint8_t from_level,
+    void Update(uint32_t cf_id, const std::string& key, uint8_t from_level,
                 uint8_t to_level);
 
     /*
@@ -109,15 +104,6 @@ public:
     std::optional<uint8_t> GetLevel(const std::string& key);
 
     std::optional<uint8_t> GetLevel(uint32_t cf_id, const std::string& key);
-
-    /*
-    For `key` changes its level to (level + 1). Inserts on level `1` if there's
-    not `key` in zdd.
-
-    Returns `std::optional` of resulting `key`. If `key` is already on the
-    topmost level, returns `std::nullopt`.
-    */
-    std::optional<uint8_t> PushDown(const std::string& key);
 
     bool isEmpty();
 
@@ -142,7 +128,7 @@ private:
     std::optional<ZBDD> GetSubZDDbyKey(const ZddInternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
 
-    void InsertImpl(const ZddInternalKey& ikey, uint8_t from_level,
+    void UpdateImpl(const ZddInternalKey& ikey, uint8_t from_level,
                     uint8_t to_level);
 
     void DeleteImpl(const ZddInternalKey& ikey, uint8_t level);

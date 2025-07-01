@@ -18,7 +18,7 @@ std::string GenerateKey(size_t count) {
     return bytes;
 }
 
-TEST(NextLevelInsert, single_insert_works_correctly) {
+TEST(Update, single_insert_works_correctly) {
     std::ifstream file;
     file.open("../src/tests/files/lex_sorted_strings_256.txt");
 
@@ -38,15 +38,15 @@ TEST(NextLevelInsert, single_insert_works_correctly) {
 
     EXPECT_FALSE(zdd.GetLevel(keys[0]).has_value());
 
-    zdd.NextLevelInsert(keys[0], 1);
+    zdd.Update(keys[0], 0, 1);
     EXPECT_EQ(zdd.GetLevel(keys[0]), 1);
 
-    zdd.NextLevelInsert(keys[0], 2);
+    zdd.Update(keys[0], 1, 2);
     EXPECT_NE(zdd.GetLevel(keys[0]), 1);
     EXPECT_EQ(zdd.GetLevel(keys[0]), 2);
 
     for (size_t i = 1; i != 11; ++i) {
-        zdd.NextLevelInsert(keys[0], i);
+        zdd.Update(keys[0], i - 1, i);
     }
     EXPECT_EQ(zdd.GetLevel(keys[0]), 10);
 
@@ -54,49 +54,18 @@ TEST(NextLevelInsert, single_insert_works_correctly) {
     EXPECT_FALSE(zdd.GetLevel(keys[0]).has_value());
 }
 
-TEST(NextLevelInsert, zero_prefixed_insert_works_correctly) {
+TEST(Update, zero_prefixed_insert_works_correctly) {
     ZDDLSM::Storehouse zdd(256, 4);
 
     std::string key_0 = "\0abcd";
 
-    zdd.NextLevelInsert(key_0, 1);
-    zdd.NextLevelInsert("zzzzzz", 1);
-    zdd.NextLevelInsert("\0\0a", 1);
+    zdd.Update(key_0, 0, 1);
+    zdd.Update("zzzzzz", 0, 1);
+    zdd.Update("\0\0a", 0, 1);
     EXPECT_EQ(zdd.GetLevel(key_0).value(), 1);
 }
 
-
-TEST(NextLevelInsert, single_insert_works_correctly_when_adding_to_lev_1) {
-    std::ifstream file;
-    file.open("../src/tests/files/lex_sorted_strings_256.txt");
-
-    EXPECT_TRUE(file.is_open());
-
-    int n = 0;
-    file >> n;
-    std::vector<std::string> keys;
-
-    for (int i = 0; i != n; ++i) {
-        std::string key;
-        file >> key;
-        keys.push_back(key);
-    }
-
-    ZDDLSM::Storehouse zdd(256, 4);
-
-    for (size_t i = 1; i != 11; ++i) {
-        zdd.NextLevelInsert(keys[0], i);
-    }
-    EXPECT_EQ(zdd.GetLevel(keys[0]), 10);
-
-    zdd.NextLevelInsert(keys[0], 1);
-    EXPECT_EQ(zdd.GetLevel(keys[0]), 1);
-
-    zdd.NextLevelInsert(keys[0], 1);
-    EXPECT_EQ(zdd.GetLevel(keys[0]), 1);
-}
-
-TEST(NextLevelInsert, multiple_insert_works_correctly) {
+TEST(Update, multiple_insert_works_correctly) {
     std::ifstream file;
     file.open("../src/tests/files/lex_sorted_strings_256.txt");
 
@@ -116,7 +85,7 @@ TEST(NextLevelInsert, multiple_insert_works_correctly) {
     uint32_t max_level = std::pow(2, 4);
 
     for (auto& key : keys) {
-        zdd.NextLevelInsert(key, 1);
+        zdd.Update(key, 0, 1);
     }
 
     for (auto& key : keys) {
@@ -129,7 +98,7 @@ TEST(NextLevelInsert, multiple_insert_works_correctly) {
 
     for (size_t i = 0; i != keys.size(); ++i) {
         for (size_t j = 1; j != i + 2; ++j) {
-            zdd.NextLevelInsert(keys[i], j % max_level + (j % max_level == 0));
+            zdd.Update(keys[i], zdd.GetLevel(keys[i]).value_or(0), j % max_level + (j % max_level == 0));
         }
     }
 
@@ -139,22 +108,23 @@ TEST(NextLevelInsert, multiple_insert_works_correctly) {
     }
 }
 
-TEST(NextLevelInsert, insert_only_1e4_test) {
+TEST(Update, insert_only_1e4_test) {
     ZDDLSM::Storehouse zdd(160, 4);
 
     for (uint32_t i = 0; i != 1e4; ++i) {
         std::string str = GenerateKey(20);
-        zdd.NextLevelInsert(str, 1);
+        zdd.Update(str, 0, 1);
     }
 }
 
-TEST(NextLevelInsert, from_1_to_last_1e3_test) {
+TEST(Update, from_1_to_last_1e3_test) {
     ZDDLSM::Storehouse zdd(128, 4);
     uint32_t max_level = std::pow(2, 4);
 
     for (uint32_t i = 0; i != 1e3; ++i) {
         for (size_t j = 1; j != i + 2; ++j) {
-            zdd.NextLevelInsert(std::string(4, i), j % max_level + (j % max_level == 0));
+            std::string key = std::string(4, i);
+            zdd.Update(key, zdd.GetLevel(key).value_or(0), j % max_level + (j % max_level == 0));
         }
     }
 
@@ -164,39 +134,12 @@ TEST(NextLevelInsert, from_1_to_last_1e3_test) {
     }
 }
 
-TEST(PushDown, push_only_1e4_test) {
+TEST(Update, 1e4_test) {
     ZDDLSM::Storehouse zdd(160, 4);
 
     for (uint32_t i = 0; i != 1e4; ++i) {
         std::string str = GenerateKey(20);
-        zdd.PushDown(str);
-    }
-}
-
-TEST(PushDown, push_down_works_correctly) {
-    std::ifstream file;
-    file.open("../src/tests/files/lex_sorted_strings_256.txt");
-
-    EXPECT_TRUE(file.is_open());
-
-    int n = 0;
-    file >> n;
-    std::vector<std::string> keys;
-
-    for (int i = 0; i != n; ++i) {
-        std::string key;
-        file >> key;
-        keys.push_back(key);
-    }
-
-    ZDDLSM::Storehouse zdd(128, 4);
-    uint32_t max_level = std::pow(2, 4);
-
-    for (uint32_t i = 1; i != max_level; ++i) {
-        for (auto& key : keys) {
-            zdd.PushDown(key);
-            EXPECT_EQ(zdd.GetLevel(key), i);
-        }
+        zdd.Update(str, 0, 1);
     }
 }
 
@@ -219,7 +162,7 @@ TEST(Delete, delete_is_correct) {
     ZDDLSM::Storehouse zdd(128, 4);
 
     for (auto& key : keys) {
-        zdd.PushDown(key);
+        zdd.Update(key, 0, 1);
         EXPECT_EQ(zdd.GetLevel(key), 1);
     }
 
@@ -250,7 +193,7 @@ TEST(Delete, delete_is_correct) {
     EXPECT_TRUE(zdd.isEmpty());
 }
 
-TEST(NextLevelInsert, concurrent_access_is_correct) {
+TEST(Update, concurrent_access_is_correct) {
     ZDDLSM::Storehouse zdd(128, 4);
     std::vector<std::thread> threads;
     uint32_t threads_number = 8;
@@ -262,7 +205,7 @@ TEST(NextLevelInsert, concurrent_access_is_correct) {
                 EXPECT_TRUE(zdd.GetLevel(std::string(guard.id, 4)).has_value());
                 zdd.Delete(std::string(guard.id, 4), 1);
             }
-            zdd.NextLevelInsert(std::string(guard.id + 1, 4), 1);
+            zdd.Update(std::string(guard.id + 1, 4), 0, 1);
         });
     }
 
@@ -279,16 +222,16 @@ TEST(NextLevelInsert, concurrent_access_is_correct) {
     }
 }
 
-TEST(NextLevelInsert, works_with_strings) {
+TEST(Update, works_with_strings) {
     ZDDLSM::Storehouse zdd(16 * 8, 4);
     std::string str1 = "abcdefghijklmn";
     std::string str2 = "abcdefghijkl";
     std::string str3 = "w";
     std::string not_added_string = "abcdefghijklmno";
 
-    zdd.NextLevelInsert(str1, 1);
-    zdd.NextLevelInsert(str2, 1);
-    zdd.NextLevelInsert(str3, 1);
+    zdd.Update(str1, 0, 1);
+    zdd.Update(str2, 0, 1);
+    zdd.Update(str3, 0, 1);
     EXPECT_TRUE(zdd.GetLevel(str1).has_value());
     EXPECT_EQ(zdd.GetLevel(str1).value(), 1);
     EXPECT_TRUE(zdd.GetLevel(str2).has_value());
@@ -301,7 +244,7 @@ TEST(NextLevelInsert, works_with_strings) {
 TEST(Iterator, iterator_inits_with_init_value) {
     ZDDLSM::Storehouse zdd(16 * 8, 4);
     std::string str1 = "abcdefghijklmn";
-    zdd.NextLevelInsert(str1, 1);
+    zdd.Update(str1, 0, 1);
     ZDDLSM::KeyLevelPair kl(str1, 1);
 
     ZDDLSM::ZDDLSMIterator it(&zdd, str1);
@@ -315,10 +258,10 @@ TEST(Iterator, iterator_inits_with_min_larger_value) {
     std::string str1 = "bbrdefghijklmna";
     std::string str2 = "bbd";
     std::string str3 = "dcdscsdc";
-    zdd.NextLevelInsert(str0, 1);
-    zdd.NextLevelInsert(str1, 1);
-    zdd.NextLevelInsert(str2, 1);
-    zdd.NextLevelInsert(str3, 1);
+    zdd.Update(str0, 0, 1);
+    zdd.Update(str1, 0, 1);
+    zdd.Update(str2, 0, 1);
+    zdd.Update(str3, 0, 1);
 
     ZDDLSM::KeyLevelPair kl(str1, 1);
 
@@ -334,10 +277,10 @@ TEST(Iterator, iterator_begin_ctor_works_properly) {
     std::string str1 = "bbcdefghijklmna";
     std::string str2 = "bbd";
     std::string str3 = "dcdscsdc";
-    zdd.NextLevelInsert(str0, 1);
-    zdd.NextLevelInsert(str1, 1);
-    zdd.NextLevelInsert(str2, 1);
-    zdd.NextLevelInsert(str3, 1);
+    zdd.Update(str0, 0, 1);
+    zdd.Update(str1, 0, 1);
+    zdd.Update(str2, 0, 1);
+    zdd.Update(str3, 0, 1);
 
     ZDDLSM::KeyLevelPair kl0(str0, 1);
     ZDDLSM::KeyLevelPair kl1(str1, 1);
@@ -375,7 +318,7 @@ TEST(Iterator, Next_works_properply_small_test_0) {
     ZDDLSM::Storehouse zdd(32 * 8, 4);
 
     for (std::string& key : keys) {
-        zdd.NextLevelInsert(key, 1);
+        zdd.Update(key, 0, 1);
     }
 
     ZDDLSM::ZDDLSMIterator it(&zdd);
@@ -389,12 +332,12 @@ TEST(Iterator, Next_works_properply_small_test_0) {
 TEST(Iterator, Next_works_properply_small_test_1) {
     ZDDLSM::Storehouse zdd(32 * 8, 4);
 
-    zdd.NextLevelInsert("a", 1);
-    zdd.NextLevelInsert("aa", 1);
-    zdd.NextLevelInsert("aaa", 1);
-    zdd.NextLevelInsert("aaaa", 1);
-    zdd.NextLevelInsert("aaaaa", 1);
-    zdd.NextLevelInsert("aaaaaa", 1);
+    zdd.Update("a", 0, 1);
+    zdd.Update("aa", 0, 1);
+    zdd.Update("aaa", 0, 1);
+    zdd.Update("aaaa", 0, 1);
+    zdd.Update("aaaaa", 0, 1);
+    zdd.Update("aaaaaa", 0, 1);
 
     {
         ZDDLSM::ZDDLSMIterator it(&zdd, "aaa");
@@ -402,7 +345,7 @@ TEST(Iterator, Next_works_properply_small_test_1) {
         EXPECT_EQ("aaa", (*it).value().Key());
     }
 
-    zdd.NextLevelInsert("aaa", 2);
+    zdd.Update("aaa", 1, 2);
 
     {
         ZDDLSM::ZDDLSMIterator it(&zdd, "aaa");
@@ -415,7 +358,7 @@ TEST(Iterator, Next_works_properply_small_test_1) {
 TEST(ColumnFamilyLogic, zero_column_family) {
     ZDDLSM::Storehouse zdd(256, 4);
 
-    zdd.Insert(0, "key", 0, 1);
+    zdd.Update(0, "key", 0, 1);
 
     EXPECT_EQ(zdd.GetLevel(0, "key").value(), 1);
 }
@@ -423,7 +366,7 @@ TEST(ColumnFamilyLogic, zero_column_family) {
 TEST(ColumnFamilyLogic, column_family_insert_simple_test_1) {
     ZDDLSM::Storehouse zdd(256, 4);
 
-    zdd.Insert(1, "key", 0, 1);
+    zdd.Update(1, "key", 0, 1);
 
     EXPECT_EQ(zdd.GetLevel(1, "key").value(), 1);
     EXPECT_FALSE(zdd.GetLevel(1, "ke").has_value());
@@ -453,7 +396,7 @@ TEST(ColumnFamilyLogic, column_family_insert_simple_test_2) {
     auto cf = [](uint32_t i) { return std::pow(10, i % 4) + i % 4; };
 
     for(uint32_t i = 0; i != keys.size(); ++i) {
-        zdd.Insert(cf(i), keys[i], 0, 1);
+        zdd.Update(cf(i), keys[i], 0, 1);
     }
 
     for(uint32_t i = 0; i != keys.size(); ++i) {
@@ -470,9 +413,9 @@ TEST(ColumnFamilyLogic, column_family_insert_simple_test_2) {
 TEST(ColumnFamilyLogic, iterator_zero_cf) {
     ZDDLSM::Storehouse zdd(32 * 8, 4);
 
-    zdd.Insert(0, "abc", 0, 1);
-    zdd.Insert(1, "abc", 0, 1);
-    zdd.Insert(1, "abacaba", 0, 1);
+    zdd.Update(0, "abc", 0, 1);
+    zdd.Update(1, "abc", 0, 1);
+    zdd.Update(1, "abacaba", 0, 1);
 
     ZDDLSM::ZDDLSMIterator iter(&zdd, 0);
     EXPECT_EQ((*iter).value().Key(), "abc");
@@ -499,7 +442,7 @@ TEST(ColumnFamilyLogic, iterator_works_with_only_one_column_family) {
     auto cf = [](uint32_t i) { return std::pow(2, i % 4); };
 
     for(uint32_t i = 0; i != keys.size(); ++i) {
-        zdd.Insert(cf(i), keys[i], 0, 1);
+        zdd.Update(cf(i), keys[i], 0, 1);
     }
     
     ZDDLSM::ZDDLSMIterator iter_1(&zdd, cf(0));
