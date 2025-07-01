@@ -18,6 +18,11 @@ std::string GenerateKey(size_t count) {
     return bytes;
 }
 
+TEST(Update, empty_key_crashes_zdd) {
+    ZDDLSM::Storehouse zdd(256, 4);
+    zdd.GetLevel(0, "");
+}
+
 TEST(Update, single_insert_works_correctly) {
     std::ifstream file;
     file.open("../src/tests/files/lex_sorted_strings_256.txt");
@@ -82,7 +87,7 @@ TEST(Update, multiple_insert_works_correctly) {
     }
 
     ZDDLSM::Storehouse zdd(128, 4);
-    uint32_t max_level = std::pow(2, 4);
+    uint32_t max_level = std::pow(2, 4) - 1;
 
     for (auto& key : keys) {
         zdd.Update(key, 0, 1);
@@ -119,18 +124,21 @@ TEST(Update, insert_only_1e4_test) {
 
 TEST(Update, from_1_to_last_1e3_test) {
     ZDDLSM::Storehouse zdd(128, 4);
-    uint32_t max_level = std::pow(2, 4);
+    uint32_t max_level = std::pow(2, 4) - 1;
+
+    std::vector<std::string> keys;
 
     for (uint32_t i = 0; i != 1e3; ++i) {
-        for (size_t j = 1; j != i + 2; ++j) {
-            std::string key = std::string(4, i);
-            zdd.Update(key, zdd.GetLevel(key).value_or(0), j % max_level + (j % max_level == 0));
+        std::string key = std::to_string(i);
+        for (size_t j = 0; j != i + 2; ++j) {
+            zdd.Update(key, zdd.GetLevel(key).value_or(0), j % max_level);
+            
         }
+        keys.push_back(std::move(key));
     }
 
     for (uint32_t i = 0; i != 1e3; ++i) {
-        EXPECT_EQ(zdd.GetLevel(std::string(4, i)),
-                  (i + 1) % max_level + ((i + 1) % max_level == 0));
+        EXPECT_EQ(zdd.GetLevel(keys[i]), (i + 1) % max_level);
     }
 }
 
@@ -473,3 +481,4 @@ TEST(ColumnFamilyLogic, iterator_works_with_only_one_column_family) {
         iter_4.Next();
     }
 }
+

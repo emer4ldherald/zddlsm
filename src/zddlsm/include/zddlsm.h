@@ -83,6 +83,13 @@ public:
     void Print();
 
     /*
+    Inserts `key` to `to_level`.
+    */
+    void Insert(const std::string& key, uint8_t to_level);
+
+    void Insert(uint32_t cf_id, const std::string& key, uint8_t to_level);
+
+    /*
     Inserts `key` to `to_level`, deletes `key` in `from_level`.
     */
     void Update(const std::string& key, uint8_t from_level, uint8_t to_level);
@@ -114,6 +121,7 @@ private:
     uint32_t key_bit_len_;
     uint8_t lsm_bits_;
     uint32_t bits_for_val_;
+    uint32_t max_level_;
 
     std::atomic<uint32_t> curr_task_id_;
     std::atomic<uint32_t> ready_task_id_;
@@ -121,12 +129,16 @@ private:
     bool ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
                         int& stack_pointer, int top_var_n);
 
+    bool AllowsLevel(uint32_t level);
+
     static inline ZBDD Child(const ZBDD& n, const int child_num);
 
     inline ZBDD LSMKeyTransform(const ZddInternalKey& key, uint8_t lsm_lev);
 
     std::optional<ZBDD> GetSubZDDbyKey(const ZddInternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
+    
+    void InsertImpl(const ZddInternalKey& ikey, uint8_t to_level);
 
     void UpdateImpl(const ZddInternalKey& ikey, uint8_t from_level,
                     uint8_t to_level);

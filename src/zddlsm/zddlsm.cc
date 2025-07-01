@@ -100,6 +100,10 @@ bool Storehouse::ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
     return true;
 }
 
+inline bool Storehouse::AllowsLevel(uint32_t level) {
+    return level <= max_level_;
+}
+
 inline ZBDD Storehouse::Child(const ZBDD& n, const int child_num) {
     ZBDD g;
     if (child_num != 0)
@@ -159,7 +163,7 @@ std::optional<ZBDD> Storehouse::GetSubZDDbyKey(const ZddInternalKey& key,
         }
     }
 
-    if (stack_pointer < 0 && current_zdd != bddfalse) {
+    if (stack_pointer < 0 && !isEmpty(current_zdd)) {
         current_zdd = current_zdd.OnSet(current_zdd.Top());
     }
 
@@ -173,6 +177,7 @@ Storehouse::Storehouse(uint32_t key_bit_len, uint8_t lsm_bits)
       key_bit_len_(key_bit_len + ZDD_ADDITIONAL_BITS),
       lsm_bits_(lsm_bits),
       bits_for_val_(sizeof(char) * 8),
+      max_level_(std::pow(2, lsm_bits_) - 1),
       curr_task_id_(0),
       ready_task_id_(0) {
     ZDDSystem::InitOnce(key_bit_len_ + lsm_bits_ + ZDD_ADDITIONAL_BITS);
@@ -184,23 +189,44 @@ ZDDLockGuard Storehouse::Lock() {
 
 void Storehouse::Print() { store_.Print(); }
 
+void Storehouse::InsertImpl(const ZddInternalKey& ikey, uint8_t to_level) {
+    ++to_level;
+    if(!AllowsLevel(to_level)) {
+        return;
+    }
+    store_ += LSMKeyTransform(ikey, to_level);
+}
+
+void Storehouse::Insert(const std::string& key, uint8_t to_level) {
+    ZddInternalKey ikey(key);
+    InsertImpl(ikey, to_level);
+}
+
+void Storehouse::Insert(uint32_t cf_id, const std::string& key, uint8_t to_level) {
+    ZddInternalKey ikey(key, cf_id);
+    InsertImpl(ikey, to_level);
+}
+
 void Storehouse::UpdateImpl(const ZddInternalKey& ikey, uint8_t from_level,
                             uint8_t to_level) {
-    if (from_level == 0) {
-        store_ += LSMKeyTransform(ikey, to_level);
-    } else {
-        ZBDD transformed_key = LSMKeyTransform(ikey, from_level);
-        store_ -= transformed_key;
-        uint8_t diff = (from_level) ^ to_level;
-        uint8_t lsmBitMask = 1;
-        for (size_t i = lsm_bits_; i > 0; --i) {
-            if ((diff & lsmBitMask) != 0) {
-                transformed_key = transformed_key.Change(i);
-            }
-            lsmBitMask = lsmBitMask << 1;
-        }
-        store_ += transformed_key;
+    ++from_level;
+    ++to_level;
+    
+    if(!AllowsLevel(from_level) || !AllowsLevel(to_level)) {
+        return;
     }
+
+    ZBDD transformed_key = LSMKeyTransform(ikey, from_level);
+    store_ -= transformed_key;
+    uint8_t diff = (from_level) ^ to_level;
+    uint8_t lsmBitMask = 1;
+    for (size_t i = lsm_bits_; i > 0; --i) {
+        if ((diff & lsmBitMask) != 0) {
+            transformed_key = transformed_key.Change(i);
+        }
+        lsmBitMask = lsmBitMask << 1;
+    }
+    store_ += transformed_key;
 }
 
 void Storehouse::Update(const std::string& key, uint8_t from_level,
@@ -216,6 +242,7 @@ void Storehouse::Update(uint32_t cf_id, const std::string& key,
 }
 
 void Storehouse::DeleteImpl(const ZddInternalKey& ikey, uint8_t level) {
+    ++level;
     store_ -= LSMKeyTransform(ikey, level);
 }
 
@@ -232,7 +259,7 @@ void Storehouse::Delete(uint32_t cf_id, const std::string& key, uint8_t level) {
 std::optional<uint8_t> Storehouse::GetLevelImpl(const ZddInternalKey& ikey) {
     std::optional<ZBDD> maybe_subzdd = GetSubZDDbyKey(ikey);
 
-    if (isEmpty() || !maybe_subzdd.has_value()) {
+    if (isEmpty() || !maybe_subzdd.has_value() || isEmpty(maybe_subzdd.value())) {
         return std::nullopt;
     }
 
@@ -259,7 +286,7 @@ std::optional<uint8_t> Storehouse::GetLevelImpl(const ZddInternalKey& ikey) {
         }
     }
 
-    return level;
+    return level - 1;
 }
 
 std::optional<uint8_t> Storehouse::GetLevel(const std::string& key) {

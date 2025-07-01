@@ -11,7 +11,7 @@ set_target_properties(sapporo PROPERTIES
 )
 
 add_library(zddlsmlib 
-            ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cpp)
+            ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cc)
 
 target_include_directories(zddlsmlib PUBLIC
     ${PROJECT_SOURCE_DIR}/src/zddlsm/include
