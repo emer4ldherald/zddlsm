@@ -61,6 +61,10 @@ public:
 
     ZddInternalKey(const std::string& key, uint32_t cf_id);
 
+    const std::string &UserKey() const { return key_; }
+    
+    uint32_t CfID() const { return cf_id_; }
+
     char operator[](uint32_t index) const;
 
 private:
@@ -126,8 +130,12 @@ private:
     std::atomic<uint32_t> curr_task_id_;
     std::atomic<uint32_t> ready_task_id_;
 
-    bool ProcessZddNode(ZBDD& zdd, std::vector<bddvar>& nz_zdd_vars,
-                        int& stack_pointer, int top_var_n);
+    std::vector<bddvar> nz_zdd_vars_;
+
+    bool ProcessZddNode(ZBDD& zdd, int& stack_pointer, int top_var_n);
+
+    void GetNzZddVars(const ZddInternalKey& zdd_ikey,
+                      uint32_t prefix_len = 0xFFFFFFFF);
 
     bool AllowsLevel(uint32_t level);
 

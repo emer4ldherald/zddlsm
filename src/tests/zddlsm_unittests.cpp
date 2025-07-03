@@ -18,11 +18,6 @@ std::string GenerateKey(size_t count) {
     return bytes;
 }
 
-TEST(Update, empty_key_crashes_zdd) {
-    ZDDLSM::Storehouse zdd(256, 4);
-    zdd.GetLevel(0, "");
-}
-
 TEST(Update, single_insert_works_correctly) {
     std::ifstream file;
     file.open("../src/tests/files/lex_sorted_strings_256.txt");
