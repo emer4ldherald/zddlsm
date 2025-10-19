@@ -1,14 +1,32 @@
 cmake_minimum_required(VERSION 3.28)
-
 project(zddlsm)
 
-add_compile_options(-Wall -Wextra -Wshadow -DB_64 -O3 -Ofast)
+include(ExternalProject)
 
-add_library(sapporo STATIC IMPORTED)
-set_target_properties(sapporo PROPERTIES
-    IMPORTED_LOCATION ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/lib/BDD64.a
-    INTERFACE_INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/src/SAPPOROBDD/include
+add_compile_options(-Wall -Wno-overflow -Wextra -Wshadow -DB_64 -O3 -Ofast)
+
+set(SAPPORO_ROOT ${PROJECT_SOURCE_DIR}/SAPPOROBDD)
+set(SAPPORO_SRC_DIR ${SAPPORO_ROOT}/src)
+set(SAPPORO_LIB ${SAPPORO_ROOT}/lib/libBDD64.so)
+
+ExternalProject_Add(sapporo_build
+    SOURCE_DIR ${PROJECT_SOURCE_DIR}/build_scripts
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND make
+    BUILD_IN_SOURCE 1
+    INSTALL_COMMAND ""
+    COMMENT "Building SAPPOROBDD (libBDD64.so and libbddc64.so)..."
 )
+
+add_library(sapporo SHARED IMPORTED GLOBAL)
+
+set_target_properties(sapporo PROPERTIES
+    IMPORTED_LOCATION ${SAPPORO_LIB}
+    INTERFACE_INCLUDE_DIRECTORIES ${SAPPORO_ROOT}/include
+    #INTERFACE_LINK_LIBRARIES sapporo_c
+)
+
+add_dependencies(sapporo sapporo_build)
 
 add_library(zddlsmlib 
             ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cc)

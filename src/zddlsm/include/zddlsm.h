@@ -8,7 +8,7 @@
 #include <set>
 #include <vector>
 
-#include "../../SAPPOROBDD/include/ZBDD.h"
+#include "../../../SAPPOROBDD/include/ZBDD.h"
 
 namespace ZDDLSM {
 class KeyLevelPair {
@@ -132,7 +132,8 @@ private:
 
     std::vector<bddvar> nz_zdd_vars_;
 
-    bool ProcessZddNode(ZBDD& zdd, int& stack_pointer, int top_var_n);
+    bool ProcessZddNode(ZBDD& zdd,
+                        int& stack_pointer, int top_var_n);
 
     void GetNzZddVars(const ZddInternalKey& zdd_ikey,
                       uint32_t prefix_len = 0xFFFFFFFF);

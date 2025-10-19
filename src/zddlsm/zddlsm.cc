@@ -50,36 +50,37 @@ ZddInternalKey::ZddInternalKey(const std::string& key, uint32_t cf_id)
 
 char ZddInternalKey::operator[](uint32_t index) const {
     if (index >= total_size_) {
-        return '\0';
+        return 0;
     }
     if (has_cf_ && index < sizeof(cf_id_)) {
         uint32_t byte_pos = sizeof(cf_id_) - index - 1;
         return static_cast<char>((cf_id_ >> byte_pos * 8 * sizeof(char)) &
-                                  0x000000FF);
+                                 0x000000FF);
     } else if (has_cf_) {
         return key_[index - sizeof(cf_id_)];
     }
     return key_[index];
 }
 
-void Storehouse::GetNzZddVars(const ZDDLSM::ZddInternalKey& zdd_ikey, uint32_t prefix_len) {
+void Storehouse::GetNzZddVars(const ZDDLSM::ZddInternalKey& zdd_ikey,
+                                 uint32_t prefix_len) {
     nz_zdd_vars_.clear();
     int nz_bits_n = 0;
 
-    for (uint32_t i = key_bit_len_, j = 0; i != 0; --i, ++j) {
-        if (i > prefix_len) {
-            continue;
-        }
+    for (uint32_t i = std::min(key_bit_len_, prefix_len), j = key_bit_len_ - i; i != 0; --i, ++j) {
         if (0 != (zdd_ikey[(i - 1) / bits_for_val_] & 1 << j % bits_for_val_)) {
             nz_zdd_vars_.push_back(BDD_LevOfVar(lsm_bits_ + j + 1));
             ++nz_bits_n;
         }
     }
 
-    // std::sort(nz_zdd_vars_.begin(), nz_zdd_vars_.end());
+    if(!std::is_sorted(nz_zdd_vars_.begin(), nz_zdd_vars_.end())) {
+        std::sort(nz_zdd_vars_.begin(), nz_zdd_vars_.end());
+    }
 }
 
-bool Storehouse::ProcessZddNode(ZBDD& zdd, int& stack_pointer, int top_var_n) {
+bool Storehouse::ProcessZddNode(ZBDD& zdd,
+                                int& stack_pointer, int top_var_n) {
     auto level_of_top_var = BDD_LevOfVar(top_var_n);
     if (stack_pointer < 0 ||
         level_of_top_var > static_cast<int64_t>(nz_zdd_vars_[stack_pointer])) {
