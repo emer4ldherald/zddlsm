@@ -33,7 +33,13 @@ Now you can run unit-tests
 and resource usage test
 
 ```bash
-./rusage_test [KEYS_BYTE_LEN] [TEST_SIZE] [COMPRESSION_TYPE]
+./rusage_test [KEYS_BYTE_LEN] [TEST_SIZE] [COMPRESSION_TYPE] [RESULTS_DIR]
 ```
 
-where `[COMPRESSION_TYPE]` is optional and is one of `zstd`, `md5` or `sha256`.
+where `[COMPRESSION_TYPE]` is one of `zstd`, `md5`, `sha256` or `none`.
+
+You can also run python resource usage comparative test.
+
+```bash
+python3 rusage_comp_test.py [KEYS_BYTE_LEN] [TEST_SIZE] [RESULTS_DIR]
+```

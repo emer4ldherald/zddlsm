@@ -49,7 +49,7 @@ target_link_libraries(zddlsmlib
 )
 
 add_executable(rusage_test
-    src/main.cc
+    src/rusage_test.cc
 )
 
 set_target_properties(rusage_test PROPERTIES

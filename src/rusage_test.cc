@@ -97,14 +97,28 @@ void test(uint32_t key_byte_len, uint32_t test_size,
     time_samples.reserve(test_size);
     mem_samples.reserve(test_size);
 
+    auto compression = [type]() {
+        switch (type) {
+            case Compression::compression::zstd:
+                return "zstd";
+            case Compression::compression::md5:
+                return "md5";
+            case Compression::compression::sha256:
+                return "sha256";
+            default:
+                return "uncompressed";
+        }
+    };
+
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i <= test_size; ++i) {
         if (i % step == 0) {
             double mem_used = GetMemoryUsage();
             double time_used = GetTimeInSecs(start);
-            std::cout << "Inserted: " << i << "\n";
-            std::cout << "Memory used: " << mem_used << "MB\n";
-            std::cout << "Time used: " << time_used << "s\n\n";
+            std::cout << "Compression type: " << compression() << "\n";
+            std::cout << "Inserted        : " << i << "\n";
+            std::cout << "Memory used     : " << mem_used << "MB\n";
+            std::cout << "Time used       : " << time_used << "s\n\n";
             time_samples.push_back(time_used);
             mem_samples.push_back(mem_used);
             start = std::chrono::high_resolution_clock::now();
@@ -119,19 +133,15 @@ void test(uint32_t key_byte_len, uint32_t test_size,
 }  // namespace TEST
 
 int main(int argc, char* argv[]) {
-    if (!(argc == 3 || argc == 4)) {
+    if (argc != 5) {
         std::cerr << "wrong number of args\n";
         return 1;
     }
 
     uint32_t key_byte_len = std::stoul(argv[1]);
     uint32_t test_size = std::stoul(argv[2]);
-
-    std::string compression_type;
-
-    if (argc == 4) {
-        compression_type = argv[3];
-    }
+    std::string compression_type = argv[3];
+    std::string tests_dir = argv[4];
 
     auto compression = [&compression_type]() {
         if (compression_type == "zstd") {
@@ -144,8 +154,6 @@ int main(int argc, char* argv[]) {
             return Compression::compression::none;
         }
     };
-
-    std::string tests_dir = "../../zddlsm_tests/tests/";
 
     TEST::test(key_byte_len, test_size, tests_dir, compression());
 
