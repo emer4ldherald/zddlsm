@@ -53,7 +53,9 @@ test_size = args[2]
 test_dir = "rusage_tests/"
 test_name = "test_" + str(key_len) + "_" + test_size
 
+print("Generating test...")
 generate_test(key_len, test_size)
+print("Test has been generated!")
 
 for compression_type in compression:
     subprocess.run(
