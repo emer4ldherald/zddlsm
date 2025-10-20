@@ -7,6 +7,7 @@ import re
 import random
 import string
 
+
 def mkdir(dir):
     try:
         os.mkdir(dir)
@@ -18,9 +19,9 @@ def mkdir(dir):
         print(f"An error occurred: {e}")
 
 
-
 ALPH = string.ascii_letters + string.digits + string.punctuation
 r = random.Random()
+
 
 def generate_key(length, alphabet=ALPH):
     out = []
@@ -34,6 +35,7 @@ def generate_key(length, alphabet=ALPH):
             if len(out) >= length:
                 break
     return "".join(out)
+
 
 def generate_test(key_len, size):
     dir = "rusage_tests/"
@@ -118,8 +120,6 @@ formatter.set_powerlimits((0, 0))
 # time
 fig_time, ax_time = plt.subplots()
 
-ax_time.xaxis.set_major_formatter(formatter)
-
 for compression_type in compression:
     ax_time.plot(
         x_axis,
@@ -129,12 +129,19 @@ for compression_type in compression:
     )
 
 ax_time.set_xlabel("keys number")
-ax_time.set_ylabel(f"time(s) per batch of size {batch_size}")
+ax_time.set_ylabel(f"time(s) per batch of size {int(batch_size)} (log scale)")
+ax_time.set_yscale("log", base=10)
 ax_time.set_title(f"Time(s) for {key_len}-byte keys")
 ax_time.legend()
 ax_time.grid(True)
 
-plt.locator_params("both", nbins=20)
+ax_time.yaxis.set_major_locator(ticker.LogLocator(base=10, subs=[1, 2, 5], numticks=20))
+
+ax_time.xaxis.set_major_formatter(formatter)
+ax_time.yaxis.set_major_formatter(ticker.FuncFormatter(lambda val, _: f"{val:.2f}"))
+
+plt.locator_params("x", nbins=20)
+
 plt.tight_layout()
 
 fig_time.savefig(test_dir + f"/png/{test_name}_time.png")
@@ -156,7 +163,7 @@ for compression_type in compression:
     )
 
 ax_mem.set_xlabel("keys number")
-ax_mem.set_ylabel(f"memory(MB) per batch of size {batch_size}")
+ax_mem.set_ylabel(f"memory(MB) per batch of size {int(batch_size)}")
 ax_mem.set_title(f"Memory(MB) for {key_len}-byte keys")
 ax_mem.legend()
 ax_mem.grid(True)
