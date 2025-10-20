@@ -35,7 +35,7 @@ def generate_test(key_len, size):
         print("Test was generated already")
         return
     
-    f = open(test_dir, "x")
+    f = open(test_dir, "w")
 
     f.write(size + "\n")
     for i in range(0, int(size)):

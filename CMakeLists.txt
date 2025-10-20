@@ -53,6 +53,11 @@ add_executable(rusage_test
 )
 
 set_target_properties(rusage_test PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../SAPPOROBDD/lib"
+)
+
+set_target_properties(rusage_test PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO
