@@ -170,15 +170,16 @@ std::optional<ZBDD> Storage::GetSubZDDbyKey(const InternalKey& key,
 Storage::Storage(uint32_t key_bit_len, uint8_t lsm_bits,
                  Compression::compression type)
     : store_(bddsingle),
-      key_bit_len_(key_bit_len + ZDD_ADDITIONAL_BITS),
       lsm_bits_(lsm_bits),
       bits_for_val_(sizeof(char) * 8),
       max_level_(std::pow(2, lsm_bits_) - 1),
       curr_task_id_(0),
       ready_task_id_(0) {
+    compressor_ = Compression::BuildCompressor(type);
+    key_bit_len_ =
+        compressor_->BytesNeeds(key_bit_len / 8) * 8 + ZDD_ADDITIONAL_BITS;
     ZDDSystem::InitOnce(key_bit_len_ + lsm_bits_ + ZDD_ADDITIONAL_BITS);
     nz_zdd_vars_.reserve(key_bit_len_);
-    compressor_ = Compression::BuildCompressor(type);
 }
 
 LockGuard Storage::Lock() { return LockGuard(curr_task_id_, ready_task_id_); }

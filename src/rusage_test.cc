@@ -48,10 +48,11 @@ double GetTimeInSecs(std::chrono::_V2::system_clock::time_point start) {
            1000;
 }
 
-void PrintResults(uint32_t key_byte_len, uint32_t test_size, uint32_t step,
+void PrintResults(uint32_t key_byte_len, uint32_t test_size,
+                  Compression::compression type, uint32_t step,
                   const std::vector<double>& time_samples,
                   const std::vector<double>& mem_samples,
-                  const std::string& tests_dir, Compression::compression type) {
+                  const std::string& tests_dir, const std::string& test_name) {
     auto compression = [type]() {
         switch (type) {
             case Compression::compression::zstd:
@@ -65,10 +66,7 @@ void PrintResults(uint32_t key_byte_len, uint32_t test_size, uint32_t step,
         }
     };
 
-    std::string testFile = tests_dir + "test_" + std::to_string(key_byte_len) +
-                           "_" + std::to_string(test_size) + "_" +
-                           compression();
-    std::ofstream f(testFile);
+    std::ofstream f(tests_dir + test_name + "_" + compression() + ".out");
 
     size_t n = test_size / step + 1;
     f << n << "\n";
@@ -87,7 +85,8 @@ void PrintResults(uint32_t key_byte_len, uint32_t test_size, uint32_t step,
 }
 
 void test(uint32_t key_byte_len, uint32_t test_size,
-          const std::string& tests_dir, Compression::compression type) {
+          Compression::compression type, const std::string& tests_dir,
+          const std::string& test_name) {
     ZDDLSM::Storage zdd(key_byte_len * 8, 4);
 
     uint32_t step = 1000;
@@ -110,6 +109,10 @@ void test(uint32_t key_byte_len, uint32_t test_size,
         }
     };
 
+    std::fstream testfile(tests_dir + test_name);
+    std::string key;
+    std::getline(testfile, key);
+
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i <= test_size; ++i) {
         if (i % step == 0) {
@@ -123,17 +126,20 @@ void test(uint32_t key_byte_len, uint32_t test_size,
             mem_samples.push_back(mem_used);
             start = std::chrono::high_resolution_clock::now();
         }
-        std::string key = GenerateKey(key_byte_len);
+        if (i == test_size) {
+            break;
+        }
+        std::getline(testfile, key);
         zdd.Update(key, 0, 1);
     }
 
-    PrintResults(key_byte_len, test_size, step, time_samples, mem_samples,
-                 tests_dir, type);
+    PrintResults(key_byte_len, test_size, type, step, time_samples, mem_samples,
+                 tests_dir, test_name);
 }
 }  // namespace TEST
 
 int main(int argc, char* argv[]) {
-    if (argc != 5) {
+    if (argc != 6) {
         std::cerr << "wrong number of args\n";
         return 1;
     }
@@ -142,6 +148,7 @@ int main(int argc, char* argv[]) {
     uint32_t test_size = std::stoul(argv[2]);
     std::string compression_type = argv[3];
     std::string tests_dir = argv[4];
+    std::string test_name = argv[5];
 
     auto compression = [&compression_type]() {
         if (compression_type == "zstd") {
@@ -155,7 +162,7 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    TEST::test(key_byte_len, test_size, tests_dir, compression());
+    TEST::test(key_byte_len, test_size, compression(), tests_dir, test_name);
 
     return 0;
 }

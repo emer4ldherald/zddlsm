@@ -28,12 +28,20 @@ std::string ZstdCompressor::Compress(const std::string& key) const {
     return std::string(buffer.data(), compressed_size);
 }
 
+uint32_t ZstdCompressor::BytesNeeds(uint32_t key_byte_len) const {
+    return ZSTD_compressBound(key_byte_len);
+}
+
 std::string MD5Hasher::Compress(const std::string& key) const {
     std::string compressed_key(MD5_DIGEST_LENGTH, '\0');
     MD5(reinterpret_cast<const unsigned char*>(key.data()), key.size(),
         reinterpret_cast<unsigned char*>(compressed_key.data()));
 
     return compressed_key;
+}
+
+uint32_t MD5Hasher::BytesNeeds(uint32_t key_byte_len) const {
+    return MD5_DIGEST_LENGTH;
 }
 
 std::string SHA256Hasher::Compress(const std::string& key) const {
@@ -44,8 +52,16 @@ std::string SHA256Hasher::Compress(const std::string& key) const {
     return compressed_key;
 }
 
+uint32_t SHA256Hasher::BytesNeeds(uint32_t key_byte_len) const {
+    return SHA256_DIGEST_LENGTH;
+}
+
 std::string NoCompression::Compress(const std::string& key) const {
     return key;
+}
+
+uint32_t NoCompression::BytesNeeds(uint32_t key_byte_len) const {
+    return key_byte_len;
 }
 
 std::unique_ptr<ICompressor> BuildCompressor(compression type) {

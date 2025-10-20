@@ -1,45 +1,100 @@
 import subprocess
 import sys
+import os
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import re
+import random
+import string
+
+
+def mkdir(dir):
+    try:
+        os.mkdir(dir)
+    except FileExistsError:
+        pass
+    except PermissionError:
+        print(f"Permission denied: Unable to create '{dir}'.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+def generate_key(key_len):
+    chars = string.ascii_letters + string.digits + string.punctuation
+    return "".join(random.SystemRandom().choice(chars) for _ in range(key_len))
+
+
+def generate_test(key_len, size):
+    dir = "rusage_tests/"
+    mkdir(dir)
+
+    testname = f"test_{key_len}_{size}"
+    test_dir = dir + testname
+    f = open(test_dir, "w")
+
+    f.write(size + "\n")
+    for i in range(0, int(size)):
+        f.write(generate_key(int(key_len)) + "\n")
+
+    f.close()
+
 
 compression = ["uncompressed", "zstd", "md5", "sha256"]
-colors = {"uncompressed" : "red", "zstd" : "green", "md5" : "yellow", "sha256" : "orange"}
+colors = {"uncompressed": "red", "zstd": "green", "md5": "yellow", "sha256": "orange"}
 
 args = sys.argv
 
-if len(args) != 4 :
-     print("exprected args: [KEYS_BYTE_LEN] [TEST_SIZE] [RESULTS_DIR]")
-     exit(-1)
+if len(args) != 3:
+    print("exprected args: [KEYS_BYTE_LEN] [TEST_SIZE]")
+    exit(-1)
 
 key_len = args[1]
 test_size = args[2]
-test_dir = args[3]
+test_dir = "rusage_tests/"
 test_name = "test_" + str(key_len) + "_" + test_size
 
-for compression_type in compression :
-    subprocess.run(["./build/rusage_test", str(key_len), str(test_size), compression_type, test_dir])
+generate_test(key_len, test_size)
+
+for compression_type in compression:
+    subprocess.run(
+        [
+            "./build/rusage_test",
+            str(key_len),
+            str(test_size),
+            compression_type,
+            test_dir,
+            test_name,
+        ]
+    )
+
 
 def sci_notation(x, pos):
-    return f'{x:.0e}'
+    return f"{x:.0e}"
+
 
 graphs_time = {}
 graphs_mem = {}
 x_axis = []
 
-for compression_type in compression :
-    test_filename = test_dir + test_name + "_" + compression_type
+for compression_type in compression:
+    test_filename = test_dir + test_name + "_" + compression_type + ".out"
     f = open(test_filename, "r")
     n = int(f.readline())
     if len(x_axis) == 0:
-        x_axis = [float(i) for i in list(filter(None, re.split(' |\n', f.readline())))]
-    else :
+        x_axis = [float(i) for i in list(filter(None, re.split(" |\n", f.readline())))]
+    else:
         f.readline()
-    graphs_time[compression_type] = [float(i) for i in list(filter(None, re.split(' |\n', f.readline())))]
-    graphs_mem[compression_type] = [float(i) for i in list(filter(None, re.split(' |\n', f.readline())))]
+    graphs_time[compression_type] = [
+        float(i) for i in list(filter(None, re.split(" |\n", f.readline())))
+    ]
+    graphs_mem[compression_type] = [
+        float(i) for i in list(filter(None, re.split(" |\n", f.readline())))
+    ]
 
 batch_size = x_axis[1] - x_axis[0]
+
+mkdir(test_dir + "png/")
+mkdir(test_dir + "eps/")
 
 # axis formatting
 formatter = ticker.ScalarFormatter(useMathText=True)
@@ -56,7 +111,7 @@ for compression_type in compression:
         x_axis,
         graphs_time[compression_type],
         color=colors[compression_type],
-        label=compression_type
+        label=compression_type,
     )
 
 ax_time.set_xlabel("keys number")
@@ -68,8 +123,8 @@ ax_time.grid(True)
 plt.locator_params("both", nbins=20)
 plt.tight_layout()
 
-fig_time.savefig(f"../zddlsm_tests/results/png/{test_name}_time.png")
-fig_time.savefig(f"../zddlsm_tests/results/eps/{test_name}_time.eps", format="eps")
+fig_time.savefig(test_dir + f"/png/{test_name}_time.png")
+fig_time.savefig(test_dir + f"/eps/{test_name}_time.eps", format="eps")
 
 plt.close(fig_time)
 
@@ -83,7 +138,7 @@ for compression_type in compression:
         x_axis,
         graphs_mem[compression_type],
         color=colors[compression_type],
-        label=compression_type
+        label=compression_type,
     )
 
 ax_mem.set_xlabel("keys number")
@@ -95,7 +150,7 @@ ax_mem.grid(True)
 plt.locator_params("both", nbins=20)
 plt.tight_layout()
 
-fig_mem.savefig(f"../zddlsm_tests/results/png/{test_name}_memory.png")
-fig_mem.savefig(f"../zddlsm_tests/results/eps/{test_name}_memory.eps", format="eps")
+fig_mem.savefig(test_dir + f"/png/{test_name}_memory.png")
+fig_mem.savefig(test_dir + f"/eps/{test_name}_memory.eps", format="eps")
 
 plt.close(fig_mem)
