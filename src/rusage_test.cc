@@ -87,7 +87,7 @@ void PrintResults(uint32_t key_byte_len, uint32_t test_size,
 void test(uint32_t key_byte_len, uint32_t test_size,
           Compression::compression type, const std::string& tests_dir,
           const std::string& test_name) {
-    ZDDLSM::Storage zdd(key_byte_len * 8, 4);
+    ZDDLSM::Storage zdd(key_byte_len * 8, 4, type);
 
     uint32_t step = 1000;
 
