@@ -7,7 +7,6 @@ import re
 import random
 import string
 
-
 def mkdir(dir):
     try:
         os.mkdir(dir)
@@ -19,10 +18,22 @@ def mkdir(dir):
         print(f"An error occurred: {e}")
 
 
-def generate_key(key_len):
-    chars = string.ascii_letters + string.digits + string.punctuation
-    return "".join(random.SystemRandom().choice(chars) for _ in range(key_len))
 
+ALPH = string.ascii_letters + string.digits + string.punctuation
+r = random.Random()
+
+def generate_key(length, alphabet=ALPH):
+    out = []
+    n = len(alphabet)
+    while len(out) < length:
+        bits = r.getrandbits(64)
+        for _ in range(64 // (n.bit_length() or 1)):
+            idx = bits % n
+            bits //= n
+            out.append(alphabet[idx])
+            if len(out) >= length:
+                break
+    return "".join(out)
 
 def generate_test(key_len, size):
     dir = "rusage_tests/"
@@ -31,13 +42,9 @@ def generate_test(key_len, size):
     testname = f"test_{key_len}_{size}"
     test_dir = dir + testname
 
-    if os.path.exists(test_dir) :
-        print("Test was generated already")
-        return
-    
     f = open(test_dir, "w")
-
     f.write(size + "\n")
+
     for i in range(0, int(size)):
         f.write(generate_key(int(key_len)) + "\n")
 

@@ -482,6 +482,40 @@ TEST(ColumnFamilyLogic, iterator_works_with_only_one_column_family) {
     }
 }
 
+TEST(Compression, zstd) {
+    uint32_t key_size = 256;
+    uint32_t key_bit_size = key_size * 8;
+
+    Compression::ZstdCompressor compressor;
+
+    uint32_t keys_number = 100;
+    std::vector<std::string> keys;
+
+    int cf_id = 1;
+    int level = 1;
+
+    for (uint32_t i = 0; i != keys_number; ++i) {
+        keys.push_back(GenerateKey(key_size));
+    }
+
+    double min_ratio = 2;
+    double max_ratio = 0;
+    double total_size = 0;
+
+    for (auto key : keys) {
+        double compressed_size = compressor.Compress(key).size();
+        double ratio = static_cast<double>(compressed_size) / key.size();
+        min_ratio = std::min(min_ratio, ratio);
+        max_ratio = std::max(max_ratio, ratio);
+        total_size += compressed_size;
+    }
+
+    std::cerr << "zstd compression ratio\n";
+    std::cerr << "min ratio: " << min_ratio << "\n";
+    std::cerr << "max ratio: " << max_ratio << "\n";
+    std::cerr << "avg ratio: " << (total_size / keys_number) / key_size << "\n";
+}
+
 TEST(Compression, storage_works_with_zstd) {
     uint32_t key_size = 256;
     uint32_t key_bit_size = key_size * 8;

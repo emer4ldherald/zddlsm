@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace Compression {
-constexpr static uint32_t COMPRESSION_LEVEL_ZSTD = 20;
+constexpr static uint32_t COMPRESSION_LEVEL_ZSTD = 6;
 
 std::string ZstdCompressor::Compress(const std::string& key) const {
     if (key.size() == 0) {
