@@ -30,7 +30,12 @@ def generate_test(key_len, size):
 
     testname = f"test_{key_len}_{size}"
     test_dir = dir + testname
-    f = open(test_dir, "w")
+
+    if os.path.exists(test_dir) :
+        print("Test was generated already")
+        return
+    
+    f = open(test_dir, "x")
 
     f.write(size + "\n")
     for i in range(0, int(size)):
