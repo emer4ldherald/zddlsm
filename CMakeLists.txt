@@ -27,7 +27,6 @@ add_library(sapporo SHARED IMPORTED GLOBAL)
 set_target_properties(sapporo PROPERTIES
     IMPORTED_LOCATION ${SAPPORO_LIB}
     INTERFACE_INCLUDE_DIRECTORIES ${SAPPORO_ROOT}/include
-    #INTERFACE_LINK_LIBRARIES sapporo_c
 )
 
 add_dependencies(sapporo sapporo_build)
@@ -48,13 +47,20 @@ target_link_libraries(zddlsmlib
     ${OPENSSL_LIBRARIES}
 )
 
+set_target_properties(zddlsmlib PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    # $ORIGIN - это специальная переменная, означающая "папка, где находится эта библиотека".
+    # Путь указывает, что нужно выйти из папки build и зайти в SAPPOROBDD/lib
+    INSTALL_RPATH "$ORIGIN/../SAPPOROBDD/lib"
+)
+
 add_executable(rusage_test
     src/rusage_test.cc
 )
 
 set_target_properties(rusage_test PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../SAPPOROBDD/lib"
+    INSTALL_RPATH "$ORIGIN"
 )
 
 set_target_properties(rusage_test PROPERTIES
