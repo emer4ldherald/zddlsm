@@ -9,6 +9,10 @@ set(SAPPORO_ROOT ${PROJECT_SOURCE_DIR}/SAPPOROBDD)
 set(SAPPORO_SRC_DIR ${SAPPORO_ROOT}/src)
 set(SAPPORO_LIB ${SAPPORO_ROOT}/lib/libBDD64.so)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZSTD REQUIRED libzstd)
+pkg_check_modules(OPENSSL REQUIRED openssl)
+
 ExternalProject_Add(sapporo_build
     SOURCE_DIR ${PROJECT_SOURCE_DIR}/build_scripts
     CONFIGURE_COMMAND ""
@@ -28,26 +32,33 @@ set_target_properties(sapporo PROPERTIES
 
 add_dependencies(sapporo sapporo_build)
 
-add_library(zddlsmlib 
-            ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cc)
+add_library(zddlsmlib SHARED
+            ${PROJECT_SOURCE_DIR}/src/zddlsm/zddlsm.cc
+            ${PROJECT_SOURCE_DIR}/src/zddlsm/compression.cc)
 
 target_include_directories(zddlsmlib PUBLIC
     ${PROJECT_SOURCE_DIR}/src/zddlsm/include
+    ${ZSTD_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
 )
 
-target_link_libraries(zddlsmlib PUBLIC sapporo)
-
-add_executable(zddlsm
-    src/main.cpp
+target_link_libraries(zddlsmlib 
+    PUBLIC sapporo
+    ${ZSTD_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
 )
 
-set_target_properties(zddlsm PROPERTIES
-    CXX_STANDARD 17
+add_executable(rusage_test
+    src/main.cc
+)
+
+set_target_properties(rusage_test PROPERTIES
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO
 )
 
-target_link_libraries(zddlsm
+target_link_libraries(rusage_test
     zddlsmlib
 )
 
@@ -56,11 +67,11 @@ target_link_libraries(zddlsm
 #
 
 add_executable(zddlsm_unittests
-    src/tests/main.cpp
-    src/tests/zddlsm_unittests.cpp)
+    src/tests/main.cc
+    src/tests/zddlsm_unittests.cc)
 
 set_target_properties(zddlsm_unittests PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
 
