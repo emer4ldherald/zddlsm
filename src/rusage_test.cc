@@ -48,9 +48,8 @@ double GetTimeInSecs(std::chrono::_V2::system_clock::time_point start) {
            1000;
 }
 
-void PrintResults(uint32_t key_byte_len, uint32_t test_size,
-                  Compression::compression type, uint32_t step,
-                  const std::vector<double>& time_samples,
+void PrintResults(uint32_t test_size, Compression::compression type,
+                  uint32_t step, const std::vector<double>& time_samples,
                   const std::vector<double>& mem_samples,
                   const std::string& tests_dir, const std::string& test_name) {
     auto compression = [type]() {
@@ -87,7 +86,7 @@ void PrintResults(uint32_t key_byte_len, uint32_t test_size,
 void test(uint32_t key_byte_len, uint32_t test_size,
           Compression::compression type, const std::string& tests_dir,
           const std::string& test_name) {
-    ZDDLSM::Storage zdd(key_byte_len * 8, 4, type);
+    ZDDLSM::Storage zdd(key_byte_len * 8, type);
 
     uint32_t step = 1000;
 
@@ -130,11 +129,11 @@ void test(uint32_t key_byte_len, uint32_t test_size,
             break;
         }
         std::getline(testfile, key);
-        zdd.Update(key, 0, 1);
+        zdd.Set(key, 1);
     }
 
-    PrintResults(key_byte_len, test_size, type, step, time_samples, mem_samples,
-                 tests_dir, test_name);
+    PrintResults(test_size, type, step, time_samples, mem_samples, tests_dir,
+                 test_name);
 }
 }  // namespace TEST
 

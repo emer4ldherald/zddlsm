@@ -6,7 +6,7 @@ public:
     void SetUp() override {
         int var_nubmer = 10000;
         // calls BDDSystem::InitOnce
-        ZDDLSM::Storage zdd(var_nubmer, 4);
+        ZDDLSM::Storage zdd(var_nubmer / 8);
     }
 
     void TearDown() override {}

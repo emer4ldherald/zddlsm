@@ -1,4 +1,5 @@
 #pragma once
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -15,12 +16,12 @@
 namespace ZDDLSM {
 class KeyLevelPair {
 public:
-    KeyLevelPair(std::string key, uint8_t level)
+    KeyLevelPair(std::string key, uint32_t level)
         : key_(std::move(key)), level_(level) {}
     KeyLevelPair() : key_(""), level_(0) {}
 
     std::string Key() const { return key_; }
-    uint8_t Level() const { return level_; }
+    uint32_t Level() const { return level_; }
 
     bool operator==(const KeyLevelPair& other) const {
         return key_ == other.key_ && level_ == other.level_;
@@ -28,7 +29,7 @@ public:
 
 private:
     std::string key_;
-    uint8_t level_;
+    uint32_t level_;
 };
 
 /*
@@ -56,7 +57,7 @@ class Iterator;
 
 class Storage {
 public:
-    Storage(uint32_t key_len, uint8_t lsm_bits,
+    Storage(uint32_t key_len,
             Compression::compression type = Compression::compression::none);
 
     LockGuard Lock();
@@ -66,34 +67,26 @@ public:
     void Print();
 
     /*
-    Inserts `key` to `to_level`.
+    Sets `key` to `to_level`.
     */
-    void Insert(const std::string& key, uint8_t to_level);
+    void Set(const std::string& key, uint32_t to_level);
 
-    void Insert(uint32_t cf_id, const std::string& key, uint8_t to_level);
+    void Set(uint32_t cf_id, const std::string& key, uint32_t to_level);
 
     /*
-    Inserts `key` to `to_level`, deletes `key` in `from_level`.
+    Deletes `key`
     */
-    void Update(const std::string& key, uint8_t from_level, uint8_t to_level);
+    void Delete(const std::string& key);
 
-    void Update(uint32_t cf_id, const std::string& key, uint8_t from_level,
-                uint8_t to_level);
-
-    /*
-    Deletes `key` placed on `level`
-    */
-    void Delete(const std::string& key, uint8_t level);
-
-    void Delete(uint32_t cf_id, const std::string& key, uint8_t level);
+    void Delete(uint32_t cf_id, const std::string& key);
 
     /*
     Returns `std::optional` of current `level` of `key` or `std::nullopt` if
     there's not `key` in zdd.
     */
-    std::optional<uint8_t> GetLevel(const std::string& key);
+    std::optional<uint32_t> GetLevel(const std::string& key);
 
-    std::optional<uint8_t> GetLevel(uint32_t cf_id, const std::string& key);
+    std::optional<uint32_t> GetLevel(uint32_t cf_id, const std::string& key);
 
     bool isEmpty();
 
@@ -128,12 +121,11 @@ private:
     };
 
     ZBDD store_;
+    std::unordered_map<uint32_t, uint32_t> data_;
     std::unique_ptr<Compression::ICompressor> compressor_;
+    uint32_t current_size_;
 
     uint32_t key_bit_len_;
-    uint8_t lsm_bits_;
-    uint32_t bits_for_val_;
-    uint32_t max_level_;
 
     std::atomic<uint32_t> curr_task_id_;
     std::atomic<uint32_t> ready_task_id_;
@@ -145,23 +137,18 @@ private:
     void GetNzZddVars(const InternalKey& zdd_ikey,
                       uint32_t prefix_len = 0xFFFFFFFF);
 
-    bool AllowsLevel(uint32_t level);
-
     static inline ZBDD Child(const ZBDD& n, const int child_num);
 
-    inline ZBDD LSMKeyTransform(const InternalKey& key, uint8_t lsm_lev);
+    inline ZBDD LSMKeyTransform(const InternalKey& key, uint32_t lsm_lev);
 
     std::optional<ZBDD> GetSubZDDbyKey(const InternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
 
-    void InsertImpl(const InternalKey& ikey, uint8_t to_level);
+    void SetImpl(const InternalKey& ikey, uint32_t to_level);
 
-    void UpdateImpl(const InternalKey& ikey, uint8_t from_level,
-                    uint8_t to_level);
+    void DeleteImpl(const InternalKey& ikey);
 
-    void DeleteImpl(const InternalKey& ikey, uint8_t level);
-
-    std::optional<uint8_t> GetLevelImpl(const InternalKey& ikey);
+    std::optional<uint32_t> GetLevelImpl(const InternalKey& ikey);
 
     friend class Iterator;
 };

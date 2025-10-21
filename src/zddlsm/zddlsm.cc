@@ -7,6 +7,9 @@ Number of preallocated nodes to avoid extra allocations and rehashing of
 SAPPORO.
 */
 constexpr static uint32_t ZDD_INIT_SIZE = 4096;
+constexpr static uint32_t BITS_IN_BYTE = 8;
+constexpr static int DATA_BIT_LEN = sizeof(uint32_t) * BITS_IN_BYTE;
+constexpr static int BITS_FOR_VAL = sizeof(char) * BITS_IN_BYTE;
 
 /*
 Bits for column family information and for other purposes.
@@ -74,8 +77,8 @@ void Storage::GetNzZddVars(const InternalKey& zdd_ikey, uint32_t prefix_len) {
 
     for (uint32_t i = std::min(key_bit_len_, prefix_len), j = key_bit_len_ - i;
          i != 0; --i, ++j) {
-        if (0 != (zdd_ikey[(i - 1) / bits_for_val_] & 1 << j % bits_for_val_)) {
-            nz_zdd_vars_.push_back(BDD_LevOfVar(lsm_bits_ + j + 1));
+        if (0 != (zdd_ikey[(i - 1) / BITS_FOR_VAL] & 1 << j % BITS_FOR_VAL)) {
+            nz_zdd_vars_.push_back(BDD_LevOfVar(DATA_BIT_LEN + j + 1));
             ++nz_bits_n;
         }
     }
@@ -100,8 +103,6 @@ bool Storage::ProcessZddNode(ZBDD& zdd, int& stack_pointer, int top_var_n) {
     return true;
 }
 
-inline bool Storage::AllowsLevel(uint32_t level) { return level <= max_level_; }
-
 inline ZBDD Storage::Child(const ZBDD& n, const int child_num) {
     ZBDD g;
     if (child_num != 0)
@@ -112,22 +113,22 @@ inline ZBDD Storage::Child(const ZBDD& n, const int child_num) {
 }
 
 inline ZBDD Storage::LSMKeyTransform(const InternalKey& zdd_ikey,
-                                     uint8_t lsm_lev) {
+                                     uint32_t lsm_lev) {
     ZBDD resulting_zdd = bddsingle;
 
     // last node stands for msb
-    uint8_t lsmBitMask = std::pow(2, lsm_bits_ - 1);
-    for (size_t i = 1; i <= lsm_bits_; ++i) {
-        if ((lsmBitMask & lsm_lev) != 0) {
+    uint32_t bit_mask = std::pow(2, DATA_BIT_LEN - 1);
+    for (size_t i = 1; i <= DATA_BIT_LEN; ++i) {
+        if ((bit_mask & lsm_lev) != 0) {
             resulting_zdd = resulting_zdd.Change(i);
         }
-        lsmBitMask = lsmBitMask >> 1;
+        bit_mask = bit_mask >> 1;
     }
 
     for (size_t i = key_bit_len_, j = 0; i != 0; --i, ++j) {
-        if (0 != (zdd_ikey[(i - 1) / bits_for_val_] & 1 << j % bits_for_val_)) {
+        if (0 != (zdd_ikey[(i - 1) / BITS_FOR_VAL] & 1 << j % BITS_FOR_VAL)) {
             resulting_zdd =
-                resulting_zdd.Change(lsm_bits_ + (key_bit_len_ - i) + 1);
+                resulting_zdd.Change(DATA_BIT_LEN + (key_bit_len_ - i) + 1);
         }
     }
 
@@ -146,10 +147,10 @@ std::optional<ZBDD> Storage::GetSubZDDbyKey(const InternalKey& key,
     int stack_pointer = nz_zdd_vars_.size() - 1;
     for (size_t i = 1; i <= key_bit_len_; ++i) {
         auto top_var_n = current_zdd.Top();
-        if (isEmpty(current_zdd) || top_var_n <= lsm_bits_ ||
+        if (isEmpty(current_zdd) || top_var_n <= DATA_BIT_LEN ||
             (prefix_len != 0xFFFFFFFF &&
              static_cast<uint32_t>(top_var_n) <=
-                 key_bit_len_ + lsm_bits_ - prefix_len)) {
+                 key_bit_len_ + DATA_BIT_LEN - prefix_len)) {
             break;
         }
 
@@ -167,18 +168,11 @@ std::optional<ZBDD> Storage::GetSubZDDbyKey(const InternalKey& key,
                : std::optional<ZBDD>{current_zdd};
 }
 
-Storage::Storage(uint32_t key_bit_len, uint8_t lsm_bits,
-                 Compression::compression type)
-    : store_(bddsingle),
-      lsm_bits_(lsm_bits),
-      bits_for_val_(sizeof(char) * 8),
-      max_level_(std::pow(2, lsm_bits_) - 1),
-      curr_task_id_(0),
-      ready_task_id_(0) {
+Storage::Storage(uint32_t key_len, Compression::compression type)
+    : store_(bddsingle), current_size_(0), curr_task_id_(0), ready_task_id_(0) {
     compressor_ = Compression::BuildCompressor(type);
-    key_bit_len_ =
-        compressor_->BytesNeeds(key_bit_len / 8) * 8 + ZDD_ADDITIONAL_BITS;
-    ZDDSystem::InitOnce(key_bit_len_ + lsm_bits_ + ZDD_ADDITIONAL_BITS);
+    key_bit_len_ = compressor_->BytesNeeds(key_len) * 8 + ZDD_ADDITIONAL_BITS;
+    ZDDSystem::InitOnce(key_bit_len_ + DATA_BIT_LEN);
     nz_zdd_vars_.reserve(key_bit_len_);
 }
 
@@ -186,74 +180,45 @@ LockGuard Storage::Lock() { return LockGuard(curr_task_id_, ready_task_id_); }
 
 void Storage::Print() { store_.Print(); }
 
-void Storage::InsertImpl(const InternalKey& ikey, uint8_t to_level) {
-    ++to_level;
-    if (!AllowsLevel(to_level)) {
-        return;
+void Storage::SetImpl(const InternalKey& ikey, uint32_t to_level) {
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        data_[level_key.value()] = to_level;
+    } else {
+        store_ += LSMKeyTransform(ikey, ++current_size_);
+        data_[current_size_] = to_level;
     }
-    store_ += LSMKeyTransform(ikey, to_level);
 }
 
-void Storage::Insert(const std::string& key, uint8_t to_level) {
+void Storage::Set(const std::string& key, uint32_t to_level) {
     InternalKey ikey(key, *compressor_);
-    InsertImpl(ikey, to_level);
+    SetImpl(ikey, to_level);
 }
 
-void Storage::Insert(uint32_t cf_id, const std::string& key, uint8_t to_level) {
+void Storage::Set(uint32_t cf_id, const std::string& key, uint32_t to_level) {
     InternalKey ikey(key, cf_id, *compressor_);
-    InsertImpl(ikey, to_level);
+    SetImpl(ikey, to_level);
 }
 
-void Storage::UpdateImpl(const InternalKey& ikey, uint8_t from_level,
-                         uint8_t to_level) {
-    ++from_level;
-    ++to_level;
-
-    if (!AllowsLevel(from_level) || !AllowsLevel(to_level)) {
-        return;
+void Storage::DeleteImpl(const InternalKey& ikey) {
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        data_.erase(level_key.value());
+        store_ -= LSMKeyTransform(ikey, level_key.value());
     }
-
-    ZBDD transformed_key = LSMKeyTransform(ikey, from_level);
-    store_ -= transformed_key;
-    uint8_t diff = (from_level) ^ to_level;
-    uint8_t lsmBitMask = 1;
-    for (size_t i = lsm_bits_; i > 0; --i) {
-        if ((diff & lsmBitMask) != 0) {
-            transformed_key = transformed_key.Change(i);
-        }
-        lsmBitMask = lsmBitMask << 1;
-    }
-    store_ += transformed_key;
 }
 
-void Storage::Update(const std::string& key, uint8_t from_level,
-                     uint8_t to_level) {
+void Storage::Delete(const std::string& key) {
     InternalKey ikey(key, *compressor_);
-    UpdateImpl(ikey, from_level, to_level);
+    DeleteImpl(ikey);
 }
 
-void Storage::Update(uint32_t cf_id, const std::string& key, uint8_t from_level,
-                     uint8_t to_level) {
+void Storage::Delete(uint32_t cf_id, const std::string& key) {
     InternalKey ikey(key, cf_id, *compressor_);
-    UpdateImpl(ikey, from_level, to_level);
+    DeleteImpl(ikey);
 }
 
-void Storage::DeleteImpl(const InternalKey& ikey, uint8_t level) {
-    ++level;
-    store_ -= LSMKeyTransform(ikey, level);
-}
-
-void Storage::Delete(const std::string& key, uint8_t level) {
-    InternalKey ikey(key, *compressor_);
-    DeleteImpl(ikey, level);
-}
-
-void Storage::Delete(uint32_t cf_id, const std::string& key, uint8_t level) {
-    InternalKey ikey(key, cf_id, *compressor_);
-    DeleteImpl(ikey, level);
-}
-
-std::optional<uint8_t> Storage::GetLevelImpl(const InternalKey& ikey) {
+std::optional<uint32_t> Storage::GetLevelImpl(const InternalKey& ikey) {
     std::optional<ZBDD> maybe_subzdd = GetSubZDDbyKey(ikey);
 
     if (isEmpty() || !maybe_subzdd.has_value() ||
@@ -265,19 +230,19 @@ std::optional<uint8_t> Storage::GetLevelImpl(const InternalKey& ikey) {
     ZBDD current_bit_is_taken;
     ZBDD current_bit_is_not_taken;
 
-    if (BDD_LevOfVar(curr_zdd.Top()) > lsm_bits_) {
+    if (BDD_LevOfVar(curr_zdd.Top()) > DATA_BIT_LEN) {
         return std::nullopt;
     }
 
-    uint8_t level = 0;
+    uint32_t data_key_ = 0;
 
-    for (int bit = 0; bit != lsm_bits_; ++bit) {
+    for (int bit = 0; bit != DATA_BIT_LEN; ++bit) {
         current_bit_is_not_taken = Child(curr_zdd, 0);
         current_bit_is_taken = Child(curr_zdd, 1);
         if (current_bit_is_not_taken != bddfalse) {
             curr_zdd = current_bit_is_not_taken;
         } else if (current_bit_is_taken != bddfalse) {
-            level = level | (1 << (lsm_bits_ - curr_zdd.Top()));
+            data_key_ = data_key_ | (1 << (DATA_BIT_LEN - curr_zdd.Top()));
             curr_zdd = current_bit_is_taken;
         } else {
             return std::nullopt;
@@ -288,18 +253,26 @@ std::optional<uint8_t> Storage::GetLevelImpl(const InternalKey& ikey) {
         }
     }
 
-    return level - 1;
+    return data_key_;
 }
 
-std::optional<uint8_t> Storage::GetLevel(const std::string& key) {
+std::optional<uint32_t> Storage::GetLevel(const std::string& key) {
     InternalKey ikey(key, *compressor_);
-    return GetLevelImpl(ikey);
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        return data_[level_key.value()];
+    }
+    return std::nullopt;
 }
 
-std::optional<uint8_t> Storage::GetLevel(uint32_t cf_id,
-                                         const std::string& key) {
+std::optional<uint32_t> Storage::GetLevel(uint32_t cf_id,
+                                          const std::string& key) {
     InternalKey ikey(key, cf_id, *compressor_);
-    return GetLevelImpl(ikey);
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        return data_[level_key.value()];
+    }
+    return std::nullopt;
 }
 
 bool Storage::isEmpty() { return store_ == bddtrue || store_ == bddfalse; }
@@ -389,8 +362,7 @@ void Iterator::Init(const std::string& key, ZBDD& initial_zdd) {
     ZddNode* curr_node = &nodes_.back();
 
     for (size_t i = 1; i <= zdd_->key_bit_len_; ++i) {
-        if (zdd_->isEmpty(current_zdd) ||
-            current_zdd.Top() <= zdd_->lsm_bits_) {
+        if (zdd_->isEmpty(current_zdd) || current_zdd.Top() <= DATA_BIT_LEN) {
             break;
         }
 
@@ -401,7 +373,7 @@ void Iterator::Init(const std::string& key, ZBDD& initial_zdd) {
     }
 
     if (!(stack_pointer >= 0 || current_zdd == bddfalse)) {
-        if (!nodes_.empty() && nodes_.back().level <= zdd_->lsm_bits_) {
+        if (!nodes_.empty() && nodes_.back().level <= DATA_BIT_LEN) {
             nodes_.pop_back();
         } else if (nodes_.empty()) {
             end_ = true;
@@ -462,7 +434,7 @@ void Iterator::Next() {
     int curr_level = curr_node->level;
     ZBDD current_zdd = curr_zdd_;
 
-    if (curr_level <= zdd_->lsm_bits_) {
+    if (curr_level <= DATA_BIT_LEN) {
         nodes_.pop_back();
         current_zdd = curr_node->anc;
         curr_node = &nodes_.back();
@@ -470,7 +442,7 @@ void Iterator::Next() {
     }
 
     while (!nodes_.empty()) {
-        if (current_zdd != bddfalse && curr_level <= zdd_->lsm_bits_) {
+        if (current_zdd != bddfalse && curr_level <= DATA_BIT_LEN) {
             break;
         }
 
@@ -529,7 +501,7 @@ std::optional<KeyLevelPair> Iterator::operator*() const {
     }
 
     for (ZddNode node : nodes_) {
-        int bit_pos = (node.level - zdd_->lsm_bits_ - 1);
+        int bit_pos = (node.level - DATA_BIT_LEN - 1);
         int char_n = str.size() - bit_pos / 8 - 1;
         str[char_n] = str[char_n] | ((node.right * 1) << bit_pos % 8);
     }
