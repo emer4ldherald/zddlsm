@@ -113,6 +113,14 @@ void test(uint32_t key_byte_len, uint32_t test_size,
     std::string key;
     std::getline(testfile, key);
 
+    std::vector<std::string> keys;
+    for (size_t i = 0; i <= test_size; ++i) {
+        std::getline(testfile, key);
+        keys.push_back(std::move(key));
+    }
+
+    testfile.close();
+
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i <= test_size; ++i) {
         if (i % step == 0) {
@@ -129,13 +137,27 @@ void test(uint32_t key_byte_len, uint32_t test_size,
         if (i == test_size) {
             break;
         }
-        std::getline(testfile, key);
-        zdd.Set(key, 1);
+        zdd.Set(keys[i], i);
         if (i % 2 == 0) {
-            zdd.Delete(key);
+            zdd.Delete(keys[i]);
         }
     }
-    zdd.Print();
+
+    for (size_t i = 0; i < test_size; ++i) {
+        if (i % 2 == 0) {
+            if (zdd.GetLevel(keys[i]).has_value()) {
+                std::cerr << "bad value: deleted key found\n";
+                exit(1);
+            }
+        } else {
+            if (zdd.GetLevel(keys[i]).value() != i) {
+                std::cerr << "bad value: existing key not found\n";
+                exit(1);
+            }
+        }
+    }
+
+    std::cerr << "Tests passed!\n";
 
     PrintResults(test_size, type, step, time_samples, mem_samples, tests_dir,
                  test_name);
