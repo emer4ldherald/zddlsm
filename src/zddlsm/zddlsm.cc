@@ -207,6 +207,18 @@ void Storage::Set(uint32_t cf_id, const std::string& key, uint32_t to_level) {
     SetImpl(ikey, to_level);
 }
 
+
+void Storage::SetNoCompr(uint32_t cf_id, const std::string& key, uint32_t to_level) {
+    InternalKey ikey(key, cf_id, Compression::NoCompression());
+    SetImpl(ikey, to_level);
+}
+
+void Storage::SetNoCompr(const std::string& key, uint32_t to_level) {
+    InternalKey ikey(key, Compression::NoCompression());
+    SetImpl(ikey, to_level);
+}
+
+
 void Storage::DeleteImpl(const InternalKey& ikey) {
     std::optional<uint32_t> level_key = GetLevelImpl(ikey);
     if (level_key.has_value()) {
@@ -284,6 +296,24 @@ std::optional<uint32_t> Storage::GetLevel(uint32_t cf_id,
     return std::nullopt;
 }
 
+std::optional<uint32_t> Storage::GetLevelNoCompr(const std::string& key) {
+    InternalKey ikey(key, Compression::NoCompression());
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        return data_[level_key.value()];
+    }
+    return std::nullopt;
+}
+
+std::optional<uint32_t> Storage::GetLevelNoCompr(uint32_t cf_id, const std::string& key) {
+    InternalKey ikey(key, cf_id, Compression::NoCompression());
+    std::optional<uint32_t> level_key = GetLevelImpl(ikey);
+    if (level_key.has_value()) {
+        return data_[level_key.value()];
+    }
+    return std::nullopt;
+}
+
 bool Storage::IsEmpty() { return store_ == bddtrue || store_ == bddfalse; }
 
 bool Storage::IsEmpty(ZBDD store) {
@@ -339,17 +369,23 @@ bool Iterator::TraverseNode(ZddNode*& curr_node, ZBDD& current_zdd,
     return true;
 }
 
+ShardedStorage::ShardedStorage(uint32_t key_size)
+    : ShardedStorage (key_size, Compression::compression::none, SHARDS_DEFAULT_NUMBER) {}
+
 ShardedStorage::ShardedStorage(uint32_t key_size, uint32_t shards_number)
+    : ShardedStorage (key_size, Compression::compression::none, shards_number) {}
+
+ShardedStorage::ShardedStorage(uint32_t key_size, Compression::compression type) 
+    : ShardedStorage(key_size, type, SHARDS_DEFAULT_NUMBER) {}
+
+ShardedStorage::ShardedStorage(uint32_t key_size, Compression::compression type, uint32_t shards_number)
     : key_size_(key_size),
       max_votes_for_gc_(shards_number / 10),
-      votes_for_gc_(0) {
+      votes_for_gc_(0), c_type_(type) {
     for (uint32_t i = 0; i != shards_number; ++i) {
-        shards_.push_back(std::make_unique<ZDDLSM::Storage>(key_size));
+        shards_.push_back(std::make_unique<ZDDLSM::Storage>(key_size, type));
     }
 }
-
-ShardedStorage::ShardedStorage(uint32_t key_size)
-    : ShardedStorage(key_size, SHARDS_DEFAULT_NUMBER) {}
 
 void ShardedStorage::Print() const {
     for (uint32_t i = 0; i != shards_.size(); ++i) {
@@ -373,18 +409,23 @@ uint32_t ShardedStorage::GetShardPos(const std::string& key) const {
 }
 
 void ShardedStorage::Cleanup(uint32_t shard_pos) {
-    // locked acquired
+    // lock acquired
     if (shards_[shard_pos]->Deleted() < (100000 / shards_.size()) / 3) {
         return;
     }
 
     auto it = Iterator(shards_[shard_pos].get());
-    auto clean_storage = std::make_unique<ZDDLSM::Storage>(key_size_);
+    auto clean_storage = std::make_unique<ZDDLSM::Storage>(key_size_, c_type_);
 
     while (it.HasNext()) {
         KeyLevelPair kl = (*it).value();
-        clean_storage->Set(kl.Key(), kl.Level());
+        clean_storage->SetNoCompr(kl.Key(), kl.Level());
         it.Next();
+    }
+
+    if (shards_[shard_pos]->Size() != clean_storage->Size()) {
+        std::cerr << "sizes not equal. old: " << shards_[shard_pos]->Size()
+                  << ", new: " << clean_storage->Size() << "\n";
     }
 
     shards_[shard_pos].reset();
@@ -455,7 +496,9 @@ void Iterator::UpdateCurrentNode(ZddNode*& curr_node, ZBDD& current_zdd,
 
 void Iterator::Init(const std::string& key, ZBDD& initial_zdd) {
     nodes_ = std::deque<ZddNode>();
-    zdd_->GetNzZddVars(Storage::InternalKey(key, *zdd_->compressor_));
+    zdd_->GetNzZddVars(
+        Storage::InternalKey(key, Compression::NoCompression())
+    );
 
     ZBDD current_zdd(initial_zdd);
 
@@ -519,7 +562,7 @@ Iterator::Iterator(ZDDLSM::Storage* zdd, const std::string& key)
 
 Iterator::Iterator(Storage* zdd, uint32_t cf_id, const std::string& key)
     : zdd_(zdd), end_(false) {
-    Storage::InternalKey ikey("", cf_id, *zdd_->compressor_);
+    Storage::InternalKey ikey("", cf_id, Compression::NoCompression());
     ZBDD initial_zdd = zdd->GetSubZDDbyKey(ikey, 32).value_or(bddnull);
     if (initial_zdd == bddnull) {
         end_ = true;
@@ -627,9 +670,9 @@ std::optional<KeyLevelPair> Iterator::operator*() const {
     while (*it == 0) {
         ++it;
     }
-    str.erase(0, std::distance(str.begin(), it));
+    //str.erase(0, std::distance(str.begin(), it));
 
-    uint32_t level = zdd_->GetLevel(str).value_or(0);
+    uint32_t level = zdd_->GetLevelNoCompr(str).value_or(0);
 
     return KeyLevelPair(std::move(str), level);
 }

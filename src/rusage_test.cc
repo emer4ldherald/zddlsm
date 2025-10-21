@@ -87,7 +87,7 @@ void test(uint32_t key_byte_len, uint32_t test_size,
           Compression::compression type, const std::string& tests_dir,
           const std::string& test_name) {
     // ZDDLSM::Storage zdd(key_byte_len, type);
-    ZDDLSM::ShardedStorage zdd(key_byte_len, 1000);
+    ZDDLSM::ShardedStorage zdd(key_byte_len, type, 1000);
 
     uint32_t step = 1000;
 
@@ -144,15 +144,18 @@ void test(uint32_t key_byte_len, uint32_t test_size,
     }
 
     for (size_t i = 0; i < test_size; ++i) {
+        auto level_opt = zdd.GetLevel(keys[i]);
         if (i % 2 == 0) {
-            if (zdd.GetLevel(keys[i]).has_value()) {
+            if (level_opt.has_value()) {
                 std::cerr << "bad value: deleted key found\n";
-                exit(1);
+                std::cerr << "level: " << level_opt.value() << "\n";
             }
         } else {
-            if (zdd.GetLevel(keys[i]).value() != i) {
+            if(!level_opt.has_value()) {
+                std::cerr << "key not found on level " << i << "\n";
+            } else if (zdd.GetLevel(keys[i]).value() != i) {
                 std::cerr << "bad value: existing key not found\n";
-                exit(1);
+                std::cerr << "level: " << level_opt.value() << "\n";
             }
         }
     }

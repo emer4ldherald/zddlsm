@@ -145,6 +145,14 @@ private:
 
     std::optional<ZBDD> GetSubZDDbyKey(const InternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
+    
+    void SetNoCompr(const std::string& key, uint32_t to_level);
+
+    void SetNoCompr(uint32_t cf_id, const std::string& key, uint32_t to_level);
+
+    std::optional<uint32_t> GetLevelNoCompr(const std::string& key);
+
+    std::optional<uint32_t> GetLevelNoCompr(uint32_t cf_id, const std::string& key);
 
     void SetImpl(const InternalKey& ikey, uint32_t to_level);
 
@@ -164,6 +172,10 @@ public:
     ShardedStorage(uint32_t key_size);
 
     ShardedStorage(uint32_t key_size, uint32_t shards_number);
+
+    ShardedStorage(uint32_t key_size, Compression::compression type);
+
+    ShardedStorage(uint32_t key_size, Compression::compression type, uint32_t shards_number);
 
     void Print() const;
 
@@ -194,6 +206,7 @@ private:
     const uint32_t key_size_;
     const int max_votes_for_gc_;
     std::atomic<int> votes_for_gc_;
+    Compression::compression c_type_;
 
     uint32_t GetShardPos(const std::string& key) const;
 
