@@ -192,7 +192,7 @@ TEST(Delete, delete_is_correct) {
         zdd.Delete(key);
     }
 
-    EXPECT_TRUE(zdd.isEmpty());
+    EXPECT_TRUE(zdd.IsEmpty());
 }
 
 TEST(Set, concurrent_access_is_correct) {
@@ -354,6 +354,44 @@ TEST(Iterator, Next_works_properply_small_test_1) {
 
         EXPECT_EQ("aaa", (*it).value().Key());
         EXPECT_EQ(2, (*it).value().Level());
+    }
+}
+
+TEST(Iterator, Next_works_properply_small_test_2) {
+    std::ifstream file;
+    file.open("../src/tests/files/lex_sorted_strings_256.txt");
+
+    EXPECT_TRUE(file.is_open());
+
+    int n = 0;
+    file >> n;
+    std::vector<std::string> keys;
+
+    for (int i = 0; i != n; ++i) {
+        std::string key;
+        file >> key;
+        keys.push_back(key);
+    }
+
+    ZDDLSM::Storage zdd(32);
+
+    for (std::string& key : keys) {
+        zdd.Set(key, 1);
+    }
+
+    for (int i = 0; i != n; ++i) {
+        if (i % 2 == 0) {
+            zdd.Delete(keys[i]);
+        }
+    }
+
+    ZDDLSM::Iterator it(&zdd);
+
+    for (int i = 0; i != n; ++i) {
+        if (i % 2 != 0) {
+            EXPECT_EQ(keys[i], (*it).value().Key());
+            it.Next();
+        }
     }
 }
 
@@ -584,14 +622,70 @@ TEST(Compression, storage_works_with_sha256) {
     }
 }
 
-TEST(Storehouse, multi_storehouse) {
-    uint32_t key_size = 256;
-    ZDDLSM::Storage zdd1(key_size);
-    ZDDLSM::Storage zdd2(key_size);
+TEST(Storage, multi_storage) {
+    uint32_t key_size = 10;
+    std::vector<std::unique_ptr<ZDDLSM::Storage>> storages;
+    int storages_count = 1000;
 
-    zdd1.Set("key", 1);
-    zdd2.Set("key", 2);
+    for (int i = 0; i != storages_count; ++i) {
+        storages.push_back(std::make_unique<ZDDLSM::Storage>(key_size));
+        storages.back()->Set("key", i);
+    }
 
-    EXPECT_EQ(zdd1.GetLevel("key").value(), 1);
-    EXPECT_EQ(zdd2.GetLevel("key").value(), 2);
+    for (int i = 0; i != storages_count; ++i) {
+        EXPECT_EQ(storages[i]->GetLevel("key").value(), i);
+    }
+    BDD_GC();
+}
+
+TEST(ShardedStorage, sharded_storage_works_0) {
+    uint32_t key_size = 10;
+    uint32_t shards_number = 10;
+    ZDDLSM::ShardedStorage ss(key_size, shards_number);
+
+    int keys_number = 10000;
+    std::vector<std::string> keys;
+
+    for (int i = 0; i != keys_number; ++i) {
+        keys.push_back(GenerateKey(key_size));
+    }
+
+    for (int i = 0; i != keys_number; ++i) {
+        ss.Set(keys[i], i);
+    }
+
+    for (int i = 0; i != keys_number; ++i) {
+        EXPECT_EQ(ss.GetLevel(keys[i]).value(), i);
+    }
+}
+
+TEST(ShardedStorage, sharded_storage_works_1) {
+    uint32_t key_size = 10;
+    uint32_t shards_number = 1;
+    ZDDLSM::ShardedStorage ss(key_size, shards_number);
+
+    int keys_number = 10000;
+    std::vector<std::string> keys;
+
+    for (int i = 0; i != keys_number; ++i) {
+        keys.push_back(GenerateKey(key_size));
+    }
+
+    for (int i = 0; i != keys_number; ++i) {
+        ss.Set(keys[i], i);
+    }
+
+    for (int i = 0; i != keys_number; ++i) {
+        if (i % 2 == 0) {
+            ss.Delete(keys[i]);
+        }
+    }
+
+    for (int i = 0; i != keys_number; ++i) {
+        if (i % 2 == 0) {
+            EXPECT_FALSE(ss.GetLevel(keys[i]).has_value());
+        } else {
+            EXPECT_EQ(ss.GetLevel(keys[i]).value(), i);
+        }
+    }
 }

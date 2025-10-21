@@ -88,9 +88,9 @@ public:
 
     std::optional<uint32_t> GetLevel(uint32_t cf_id, const std::string& key);
 
-    bool isEmpty();
+    bool IsEmpty();
 
-    static bool isEmpty(ZBDD store);
+    static bool IsEmpty(ZBDD store);
 
 private:
     /*
@@ -123,7 +123,9 @@ private:
     ZBDD store_;
     std::unordered_map<uint32_t, uint32_t> data_;
     std::unique_ptr<Compression::ICompressor> compressor_;
-    uint32_t current_size_;
+    uint32_t current_token_;
+    uint32_t size_;
+    uint32_t deleted_;
 
     uint32_t key_bit_len_;
 
@@ -150,7 +152,54 @@ private:
 
     std::optional<uint32_t> GetLevelImpl(const InternalKey& ikey);
 
+    uint32_t Size() const { return size_; }
+    uint32_t Deleted() const { return deleted_; }
+
     friend class Iterator;
+    friend class ShardedStorage;
+};
+
+class ShardedStorage {
+public:
+    ShardedStorage(uint32_t key_size);
+
+    ShardedStorage(uint32_t key_size, uint32_t shards_number);
+
+    void Print() const;
+
+    /*
+    Sets `key` to `to_level`.
+    */
+    void Set(const std::string& key, uint32_t to_level);
+
+    void Set(uint32_t cf_id, const std::string& key, uint32_t to_level);
+
+    /*
+    Deletes `key`
+    */
+    void Delete(const std::string& key);
+
+    void Delete(uint32_t cf_id, const std::string& key);
+
+    /*
+    Returns `std::optional` of current `level` of `key` or `std::nullopt` if
+    there's not `key` in zdd.
+    */
+    std::optional<uint32_t> GetLevel(const std::string& key);
+
+    std::optional<uint32_t> GetLevel(uint32_t cf_id, const std::string& key);
+
+private:
+    std::vector<std::unique_ptr<Storage>> shards_;
+    const uint32_t key_size_;
+    const int max_votes_for_gc_;
+    std::atomic<int> votes_for_gc_;
+
+    uint32_t GetShardPos(const std::string& key) const;
+
+    void Cleanup(uint32_t shard_pos);
+
+    void VoteForGC();
 };
 
 class Iterator {
@@ -163,6 +212,8 @@ public:
     std::optional<KeyLevelPair> operator*() const;
 
     void Next();
+
+    bool HasNext() const;
 
 private:
     struct ZddNode {

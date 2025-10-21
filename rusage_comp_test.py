@@ -58,12 +58,15 @@ colors = {"uncompressed": "red", "zstd": "green", "md5": "yellow", "sha256": "or
 
 args = sys.argv
 
-if len(args) != 3:
+if len(args) != 3 and len(args) != 4:
     print("exprected args: [KEYS_BYTE_LEN] [TEST_SIZE]")
     exit(-1)
 
 key_len = args[1]
 test_size = args[2]
+custom_suffix = ""
+if len(args) == 4:
+    custom_suffix = args[3]
 test_dir = "rusage_tests/"
 test_name = "test_" + str(key_len) + "_" + test_size
 
@@ -144,8 +147,8 @@ plt.locator_params("x", nbins=20)
 
 plt.tight_layout()
 
-fig_time.savefig(test_dir + f"/png/{test_name}_time.png")
-fig_time.savefig(test_dir + f"/eps/{test_name}_time.eps", format="eps")
+fig_time.savefig(test_dir + f"/png/{test_name}_time{custom_suffix}.png")
+fig_time.savefig(test_dir + f"/eps/{test_name}_time{custom_suffix}.eps", format="eps")
 
 plt.close(fig_time)
 
@@ -171,7 +174,7 @@ ax_mem.grid(True)
 plt.locator_params("both", nbins=20)
 plt.tight_layout()
 
-fig_mem.savefig(test_dir + f"/png/{test_name}_memory.png")
-fig_mem.savefig(test_dir + f"/eps/{test_name}_memory.eps", format="eps")
+fig_mem.savefig(test_dir + f"/png/{test_name}_memory{custom_suffix}.png")
+fig_mem.savefig(test_dir + f"/eps/{test_name}_memory{custom_suffix}.eps", format="eps")
 
 plt.close(fig_mem)

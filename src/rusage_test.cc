@@ -86,7 +86,8 @@ void PrintResults(uint32_t test_size, Compression::compression type,
 void test(uint32_t key_byte_len, uint32_t test_size,
           Compression::compression type, const std::string& tests_dir,
           const std::string& test_name) {
-    ZDDLSM::Storage zdd(key_byte_len * 8, type);
+    // ZDDLSM::Storage zdd(key_byte_len, type);
+    ZDDLSM::ShardedStorage zdd(key_byte_len, 1000);
 
     uint32_t step = 1000;
 
@@ -130,7 +131,11 @@ void test(uint32_t key_byte_len, uint32_t test_size,
         }
         std::getline(testfile, key);
         zdd.Set(key, 1);
+        if (i % 2 == 0) {
+            zdd.Delete(key);
+        }
     }
+    zdd.Print();
 
     PrintResults(test_size, type, step, time_samples, mem_samples, tests_dir,
                  test_name);
