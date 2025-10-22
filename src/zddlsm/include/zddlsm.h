@@ -32,6 +32,16 @@ private:
     uint32_t level_;
 };
 
+class GarbageCollector {
+public:
+    GarbageCollector() : gc_timer_(0) {}
+
+    void Notify();
+
+private:
+    int gc_timer_;
+};
+
 /*
 LockGuard for concurrent access.
 
@@ -123,6 +133,8 @@ private:
     ZBDD store_;
     std::unordered_map<uint32_t, uint32_t> data_;
     std::unique_ptr<Compression::ICompressor> compressor_;
+    GarbageCollector gc_;
+
     uint32_t current_token_;
     uint32_t size_;
     uint32_t deleted_;
@@ -145,14 +157,15 @@ private:
 
     std::optional<ZBDD> GetSubZDDbyKey(const InternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
-    
+
     void SetNoCompr(const std::string& key, uint32_t to_level);
 
     void SetNoCompr(uint32_t cf_id, const std::string& key, uint32_t to_level);
 
     std::optional<uint32_t> GetLevelNoCompr(const std::string& key);
 
-    std::optional<uint32_t> GetLevelNoCompr(uint32_t cf_id, const std::string& key);
+    std::optional<uint32_t> GetLevelNoCompr(uint32_t cf_id,
+                                            const std::string& key);
 
     void SetImpl(const InternalKey& ikey, uint32_t to_level);
 
@@ -165,54 +178,6 @@ private:
 
     friend class Iterator;
     friend class ShardedStorage;
-};
-
-class ShardedStorage {
-public:
-    ShardedStorage(uint32_t key_size);
-
-    ShardedStorage(uint32_t key_size, uint32_t shards_number);
-
-    ShardedStorage(uint32_t key_size, Compression::compression type);
-
-    ShardedStorage(uint32_t key_size, Compression::compression type, uint32_t shards_number);
-
-    void Print() const;
-
-    /*
-    Sets `key` to `to_level`.
-    */
-    void Set(const std::string& key, uint32_t to_level);
-
-    void Set(uint32_t cf_id, const std::string& key, uint32_t to_level);
-
-    /*
-    Deletes `key`
-    */
-    void Delete(const std::string& key);
-
-    void Delete(uint32_t cf_id, const std::string& key);
-
-    /*
-    Returns `std::optional` of current `level` of `key` or `std::nullopt` if
-    there's not `key` in zdd.
-    */
-    std::optional<uint32_t> GetLevel(const std::string& key);
-
-    std::optional<uint32_t> GetLevel(uint32_t cf_id, const std::string& key);
-
-private:
-    std::vector<std::unique_ptr<Storage>> shards_;
-    const uint32_t key_size_;
-    const int max_votes_for_gc_;
-    std::atomic<int> votes_for_gc_;
-    Compression::compression c_type_;
-
-    uint32_t GetShardPos(const std::string& key) const;
-
-    void Cleanup(uint32_t shard_pos);
-
-    void VoteForGC();
 };
 
 class Iterator {
