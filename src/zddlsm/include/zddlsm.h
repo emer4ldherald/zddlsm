@@ -33,12 +33,12 @@ private:
 };
 
 class GarbageCollector {
-public:
+    public:
     GarbageCollector() : gc_timer_(0) {}
 
     void Notify();
 
-private:
+    private:
     int gc_timer_;
 };
 
@@ -131,11 +131,11 @@ private:
     };
 
     ZBDD store_;
-    std::unordered_map<uint32_t, uint32_t> data_;
+    std::unordered_map<uint64_t, uint32_t> data_;
     std::unique_ptr<Compression::ICompressor> compressor_;
     GarbageCollector gc_;
 
-    uint32_t current_token_;
+    uint64_t current_token_;
     uint32_t size_;
     uint32_t deleted_;
 
@@ -157,15 +157,14 @@ private:
 
     std::optional<ZBDD> GetSubZDDbyKey(const InternalKey& key,
                                        uint32_t prefix_len = 0xFFFFFFFF);
-
+    
     void SetNoCompr(const std::string& key, uint32_t to_level);
 
     void SetNoCompr(uint32_t cf_id, const std::string& key, uint32_t to_level);
 
     std::optional<uint32_t> GetLevelNoCompr(const std::string& key);
 
-    std::optional<uint32_t> GetLevelNoCompr(uint32_t cf_id,
-                                            const std::string& key);
+    std::optional<uint32_t> GetLevelNoCompr(uint32_t cf_id, const std::string& key);
 
     void SetImpl(const InternalKey& ikey, uint32_t to_level);
 

@@ -8,10 +8,10 @@ SAPPORO.
 */
 constexpr static uint32_t ZDD_INIT_SIZE = 4096;
 constexpr static uint32_t BITS_IN_BYTE = 8;
-constexpr static int DATA_BIT_LEN = sizeof(uint32_t) * BITS_IN_BYTE;
+constexpr static int DATA_BIT_LEN = sizeof(uint64_t) * BITS_IN_BYTE;
 constexpr static int BITS_FOR_VAL = sizeof(char) * BITS_IN_BYTE;
 constexpr static int SHARDS_DEFAULT_NUMBER = 1000;
-constexpr static int GC_MAX_TIMER = 1000;
+constexpr static int GC_MAX_TIMER = 2000;
 
 /*
 Bits for column family information and for other purposes.
@@ -127,7 +127,7 @@ inline ZBDD Storage::LSMKeyTransform(const InternalKey& zdd_ikey,
     ZBDD resulting_zdd = bddsingle;
 
     // last node stands for msb
-    uint32_t bit_mask = std::pow(2, DATA_BIT_LEN - 1);
+    uint64_t bit_mask = std::pow(2, DATA_BIT_LEN - 1);
     for (size_t i = 1; i <= DATA_BIT_LEN; ++i) {
         if ((bit_mask & lsm_lev) != 0) {
             resulting_zdd = resulting_zdd.Change(i);
@@ -203,6 +203,7 @@ void Storage::SetImpl(const InternalKey& ikey, uint32_t to_level) {
         store_ += LSMKeyTransform(ikey, ++current_token_);
         ++size_;
         data_[current_token_] = to_level;
+        gc_.Notify();
     }
 }
 
